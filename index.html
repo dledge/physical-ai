@@ -1,0 +1,1031 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Physical AI — Entity Map</title>
+    <meta name="description" content="A visual map of companies and organizations shaping the edge and physical AI ecosystem — from inference silicon to deployed robots — clustered by what they actually do.">
+
+    <!-- Open Graph (Facebook, LinkedIn, Slack, iMessage, Discord) -->
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://dledge.github.io/physical-ai/">
+    <meta property="og:title" content="Physical AI — Entity Map">
+    <meta property="og:description" content="A visual map of companies and organizations shaping the edge and physical AI ecosystem — from inference silicon to deployed robots — clustered by what they actually do.">
+    <meta property="og:image" content="https://dledge.github.io/physical-ai/og-image.jpg">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+
+    <!-- Twitter / X -->
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:url" content="https://dledge.github.io/physical-ai/">
+    <meta name="twitter:title" content="Physical AI — Entity Map">
+    <meta name="twitter:description" content="A visual map of companies and organizations shaping the edge and physical AI ecosystem — from inference silicon to deployed robots — clustered by what they actually do.">
+    <meta name="twitter:image" content="https://dledge.github.io/physical-ai/og-image.jpg">
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Baumans&display=swap" rel="stylesheet">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { background: #0a0e1a; font-family: "Baumans", system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; overflow: hidden; color: #e0e0e0; }
+
+        #canvas-container {
+            width: 100vw;
+            height: 100vh;
+            position: relative;
+            cursor: grab;
+        }
+        #canvas-container:active { cursor: grabbing; }
+        canvas { display: block; }
+
+        #tooltip {
+            display: none;
+            position: absolute;
+            background: rgba(15, 20, 35, 0.95);
+            border: 1px solid rgba(255,255,255,0.15);
+            border-radius: 8px;
+            padding: 12px 16px;
+            max-width: 350px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+            pointer-events: none;
+            z-index: 100;
+            font-size: 13px;
+            line-height: 1.5;
+            backdrop-filter: blur(10px);
+        }
+        #tooltip .name { font-weight: 700; font-size: 15px; color: #fff; margin-bottom: 4px; }
+        #tooltip .meta { color: rgba(255,255,255,0.5); font-size: 12px; margin-bottom: 6px; }
+        #tooltip .tags { color: rgba(120,200,255,0.7); font-size: 11px; margin-bottom: 6px; font-style: italic; }
+        #tooltip .desc { color: rgba(255,255,255,0.75); }
+
+        /* Deep-hover secondary panel */
+        #deep-panel {
+            display: none;
+            position: absolute;
+            background: rgba(15, 20, 35, 0.95);
+            border: 1px solid rgba(130, 180, 235, 0.35);
+            border-radius: 8px;
+            padding: 14px 18px;
+            width: 420px;
+            max-height: 95vh;
+            overflow-y: auto;
+            box-shadow: 0 4px 30px rgba(0,0,0,0.6), 0 0 40px rgba(130,180,235,0.08);
+            pointer-events: none;
+            z-index: 99;
+            font-size: 13px;
+            line-height: 1.55;
+            backdrop-filter: blur(12px);
+            color: rgba(255,255,255,0.85);
+            opacity: 0;
+            transition: opacity 180ms ease;
+        }
+        #deep-panel.visible { opacity: 1; }
+        #deep-panel .title { font-weight: 700; font-size: 15px; color: #fff; margin-bottom: 10px; }
+        #deep-panel ul { list-style: none; padding-left: 4px; }
+        #deep-panel ul li {
+            margin-bottom: 7px;
+            color: rgba(255,255,255,0.78);
+            padding-left: 14px;
+            position: relative;
+        }
+        #deep-panel ul li::before {
+            content: "•";
+            position: absolute;
+            left: 0;
+            color: rgba(130,180,235,0.7);
+        }
+        /* Blinking cursor at the live typewriter position */
+        #deep-panel .cursor {
+            display: inline-block;
+            width: 7px;
+            background: rgba(130,180,235,0.85);
+            margin-left: 1px;
+            animation: blink 0.9s steps(1) infinite;
+        }
+        @keyframes blink { 50% { opacity: 0; } }
+
+        /* Connector between tooltip and deep panel — full-viewport SVG, no
+           pointer capture so hover stays on the canvas. */
+        #connector {
+            position: absolute;
+            top: 0; left: 0;
+            width: 100vw; height: 100vh;
+            pointer-events: none;
+            z-index: 98;
+        }
+
+        #controls {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            z-index: 50;
+        }
+        #controls h1 { font-size: 22px; font-weight: 700; color: #fff; margin-bottom: 16px; }
+
+        #search {
+            width: 260px;
+            padding: 8px 12px;
+            border: 1px solid rgba(255,255,255,0.15);
+            border-radius: 6px;
+            font-size: 14px;
+            outline: none;
+            background: rgba(255,255,255,0.07);
+            color: #fff;
+        }
+        #search:focus { border-color: rgba(255,255,255,0.3); }
+        #search::placeholder { color: rgba(255,255,255,0.3); }
+
+        #zoom-controls {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            z-index: 50;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .zoom-btn {
+            width: 36px;
+            height: 36px;
+            border: 1px solid rgba(255,255,255,0.15);
+            border-radius: 6px;
+            background: rgba(255,255,255,0.07);
+            font-size: 18px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: rgba(255,255,255,0.7);
+        }
+        .zoom-btn:hover { background: rgba(255,255,255,0.12); }
+
+        #last-updated {
+            position: absolute;
+            bottom: 14px;
+            left: 20px;
+            z-index: 50;
+            font-size: 11px;
+            color: rgba(255,255,255,0.35);
+            letter-spacing: 0.04em;
+            pointer-events: none;
+        }
+    </style>
+    <!-- Cloudflare Web Analytics -->
+    <script defer src='https://static.cloudflareinsights.com/beacon.min.js'
+            data-cf-beacon='{"token": "1b875e43e9c9482680d4cf6a3aecfaf7"}'></script>
+    <!-- End Cloudflare Web Analytics -->
+</head>
+<body>
+    <div id="canvas-container">
+        <canvas id="canvas"></canvas>
+    </div>
+
+    <div id="controls">
+        <h1>Physical AI</h1>
+        <input type="text" id="search" placeholder="Search entities...">
+    </div>
+
+    <div id="tooltip">
+        <div class="name"></div>
+        <div class="meta"></div>
+        <div class="tags"></div>
+        <div class="desc"></div>
+    </div>
+
+    <svg id="connector">
+        <line id="connector-line" x1="0" y1="0" x2="0" y2="0"
+              stroke="rgba(130,180,235,0.55)" stroke-width="1"
+              stroke-dasharray="160" stroke-dashoffset="160" />
+    </svg>
+
+    <div id="deep-panel">
+        <div class="title"></div>
+        <ul></ul>
+    </div>
+
+    <div id="zoom-controls">
+        <button class="zoom-btn" id="zoom-in">+</button>
+        <button class="zoom-btn" id="zoom-out">-</button>
+        <button class="zoom-btn" id="zoom-reset" style="font-size:12px">&#8962;</button>
+    </div>
+
+    <div id="last-updated"></div>
+
+    <script>
+    // Keys must match config.MACRO_CATEGORIES exactly, plus 'Other'.
+    const CATEGORY_COLORS = {
+        'Edge Silicon & Compute':           '#e63946',
+        'Sensors & Perception':             '#2a9d8f',
+        'Robots & Embodied Systems':        '#e9a820',
+        'Autonomy & Mobility':              '#3b82f6',
+        'AI Models & Software':             '#a855f7',
+        'Industrial & Field Deployment':    '#f97316',
+        'Investment & Policy':              '#64748b',
+        'Other':                            '#9ca3af',
+    };
+    const CATEGORY_GLOW = {
+        'Edge Silicon & Compute':           'rgba(230, 57, 70, 0.4)',
+        'Sensors & Perception':             'rgba(42, 157, 143, 0.4)',
+        'Robots & Embodied Systems':        'rgba(233, 168, 32, 0.4)',
+        'Autonomy & Mobility':              'rgba(59, 130, 246, 0.4)',
+        'AI Models & Software':             'rgba(168, 85, 247, 0.4)',
+        'Industrial & Field Deployment':    'rgba(249, 115, 22, 0.4)',
+        'Investment & Policy':              'rgba(100, 116, 139, 0.3)',
+        'Other':                            'rgba(156, 163, 175, 0.3)',
+    };
+
+    function getRadius(point, zoom) {
+        const base = Math.max(1.5, Math.min(5, Math.log2(point.mention_count + 1) * 1.4));
+        return base * Math.min(zoom, 3);
+    }
+
+    // Draw diffraction spikes — the "+" lens flare from the telescope's secondary
+    function drawDiffractionSpikes(cx, cy, radius, alpha) {
+        const spikeLen = radius * 7;
+        const angle = Math.PI / 4; // 45 degrees
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        // Draw twice: a wider softer pass, then a thin bright core
+        for (const pass of [{ w: 2.5, peak: 0.45 }, { w: 1, peak: 0.95 }]) {
+            ctx.lineWidth = pass.w;
+            for (let a = 0; a < 2; a++) {
+                const θ = angle + a * (Math.PI / 2);
+                const dx = Math.cos(θ) * spikeLen;
+                const dy = Math.sin(θ) * spikeLen;
+                const grad = ctx.createLinearGradient(cx - dx, cy - dy, cx + dx, cy + dy);
+                grad.addColorStop(0,    'rgba(255, 250, 230, 0)');
+                grad.addColorStop(0.3,  `rgba(255, 250, 230, ${pass.peak * 0.25})`);
+                grad.addColorStop(0.5,  `rgba(255, 255, 245, ${pass.peak})`);
+                grad.addColorStop(0.7,  `rgba(255, 250, 230, ${pass.peak * 0.25})`);
+                grad.addColorStop(1,    'rgba(255, 250, 230, 0)');
+                ctx.beginPath();
+                ctx.moveTo(cx - dx, cy - dy);
+                ctx.lineTo(cx + dx, cy + dy);
+                ctx.strokeStyle = grad;
+                ctx.stroke();
+            }
+        }
+        ctx.restore();
+    }
+
+    let data = null;
+    let canvas, ctx;
+    let width, height;
+    let offsetX = 0, offsetY = 0;
+    let targetOffsetX = 0, targetOffsetY = 0;
+    const MIN_ZOOM = 1.2;  // also the initial / reset zoom
+    let zoom = MIN_ZOOM;
+    let targetZoom = MIN_ZOOM;
+    // Camera-smoothing rate (per second). Frame-rate independent: the actual
+    // per-frame factor is derived via 1 - exp(-rate * dt), so 60Hz displays and
+    // 120Hz ProMotion panels converge at the same real-time speed.
+    // Tuned to match the old 0.02/frame @ 60Hz feel.
+    const CAMERA_EASE_RATE = 1.2;
+    let lastFrameTime = 0;
+    let dragging = false;
+    let dragStartX, dragStartY;
+    let searchTerm = '';
+    let hoveredPoint = null;
+    let mentionThreshold = 1;
+
+    let minX, maxX, minY, maxY, rangeX, rangeY;
+
+    // D3 force simulation
+    let simulation = null;
+    let nodes = [];
+
+    // Star field
+    let stars = [];
+
+    // Dither / film-grain overlay
+    let noiseCanvas = null;
+    const NOISE_TILE = 256;
+    function generateNoise() {
+        noiseCanvas = document.createElement('canvas');
+        noiseCanvas.width = NOISE_TILE;
+        noiseCanvas.height = NOISE_TILE;
+        const nctx = noiseCanvas.getContext('2d');
+        const img = nctx.createImageData(NOISE_TILE, NOISE_TILE);
+        for (let i = 0; i < img.data.length; i += 4) {
+            // Bluish-tinted luminance noise — centered around mid-gray so
+            // 'overlay' composite darkens and lightens symmetrically.
+            const v = 110 + Math.floor(Math.random() * 36);
+            img.data[i]     = v;
+            img.data[i + 1] = v + 2;
+            img.data[i + 2] = v + 6;
+            img.data[i + 3] = 255;
+        }
+        nctx.putImageData(img, 0, 0);
+    }
+
+    function drawNoiseOverlay() {
+        if (!noiseCanvas) return;
+        ctx.save();
+        ctx.globalCompositeOperation = 'overlay';
+        ctx.globalAlpha = 0.06;
+        // Jitter offset each frame for animated grain
+        const jx = Math.floor(Math.random() * NOISE_TILE);
+        const jy = Math.floor(Math.random() * NOISE_TILE);
+        const pattern = ctx.createPattern(noiseCanvas, 'repeat');
+        ctx.fillStyle = pattern;
+        ctx.translate(-jx, -jy);
+        ctx.fillRect(jx, jy, width, height);
+        ctx.restore();
+    }
+
+    function generateStars() {
+        stars = [];
+        const count = 400;
+        for (let i = 0; i < count; i++) {
+            stars.push({
+                x: Math.random(),
+                y: Math.random(),
+                size: Math.random() * 1.5 + 0.3,
+                brightness: Math.random() * 0.5 + 0.1,
+                twinkleSpeed: Math.random() * 0.002 + 0.001,
+                twinklePhase: Math.random() * Math.PI * 2,
+            });
+        }
+    }
+
+    function drawStars(time) {
+        for (const star of stars) {
+            const twinkle = Math.sin(time * star.twinkleSpeed + star.twinklePhase) * 0.3 + 0.7;
+            const alpha = star.brightness * twinkle;
+            ctx.beginPath();
+            ctx.arc(star.x * width, star.y * height, star.size, 0, Math.PI * 2);
+            ctx.fillStyle = `rgba(200, 210, 240, ${alpha})`;
+            ctx.fill();
+        }
+    }
+
+    function init() {
+        canvas = document.getElementById('canvas');
+        ctx = canvas.getContext('2d');
+        generateStars();
+        generateNoise();
+        resize();
+        window.addEventListener('resize', () => { resize(); generateStars(); });
+
+        canvas.addEventListener('mousedown', onMouseDown);
+        canvas.addEventListener('mousemove', onMouseMove);
+        canvas.addEventListener('mouseup', onMouseUp);
+        canvas.addEventListener('mouseleave', onMouseUp);
+        canvas.addEventListener('wheel', onWheel, { passive: false });
+
+        canvas.addEventListener('touchstart', onTouchStart, { passive: false });
+        canvas.addEventListener('touchmove', onTouchMove, { passive: false });
+        canvas.addEventListener('touchend', onTouchEnd);
+
+        document.getElementById('zoom-in').addEventListener('click', () => { targetZoom = Math.min(50, targetZoom * 1.3); });
+        document.getElementById('zoom-out').addEventListener('click', () => { targetZoom = Math.max(MIN_ZOOM, targetZoom / 1.3); });
+        document.getElementById('zoom-reset').addEventListener('click', () => { targetZoom = MIN_ZOOM; targetOffsetX = 0; targetOffsetY = 0; });
+        document.getElementById('search').addEventListener('input', (e) => { searchTerm = e.target.value.toLowerCase(); });
+
+        loadData();
+    }
+
+    async function loadData() {
+        const resp = await fetch('data.json');
+        data = await resp.json();
+
+        // Version + last-updated note — bump APP_VERSION on notable UX/pipeline changes.
+        const APP_VERSION = 'v1.14';
+        if (data.generated_at) {
+            const d = new Date(data.generated_at);
+            const mm = String(d.getMonth() + 1).padStart(2, '0');
+            const yyyy = d.getFullYear();
+            document.getElementById('last-updated').textContent =
+                `${APP_VERSION}, data last updated ${mm}-${yyyy}`;
+        } else {
+            document.getElementById('last-updated').textContent = APP_VERSION;
+        }
+
+        minX = Infinity; maxX = -Infinity;
+        minY = Infinity; maxY = -Infinity;
+        for (const p of data.points) {
+            minX = Math.min(minX, p.x);
+            maxX = Math.max(maxX, p.x);
+            minY = Math.min(minY, p.y);
+            maxY = Math.max(maxY, p.y);
+        }
+        rangeX = maxX - minX || 1;
+        rangeY = maxY - minY || 1;
+
+        // Initialize nodes for D3 force simulation
+        nodes = data.points.map(p => ({
+            ...p,
+            targetX: p.x,
+            targetY: p.y,
+            x: p.x + (Math.random() - 0.5) * 0.1,
+            y: p.y + (Math.random() - 0.5) * 0.1,
+            twinkleSpeed: 0.0008 + Math.random() * 0.0022,
+            twinklePhase: Math.random() * Math.PI * 2,
+            twinkleDepth: 0.12 + Math.random() * 0.22, // amplitude of brightness modulation
+        }));
+
+        data.points = nodes;
+        initSimulation();
+        startRenderLoop();
+    }
+
+    function initSimulation() {
+        const driftStrength = 0.00008;
+
+        for (const node of nodes) {
+            node.targetX = node.x;
+            node.targetY = node.y;
+        }
+
+        simulation = d3.forceSimulation(nodes)
+            .force('targetX', d3.forceX(d => d.targetX).strength(0.08))
+            .force('targetY', d3.forceY(d => d.targetY).strength(0.08))
+            .alphaDecay(0)
+            .alphaTarget(0.005)
+            .velocityDecay(0.7)
+            .on('tick', () => {
+                for (const node of nodes) {
+                    node.vx += (Math.random() - 0.5) * driftStrength;
+                    node.vy += (Math.random() - 0.5) * driftStrength;
+                }
+            });
+    }
+
+    function startRenderLoop() {
+        function loop(time) {
+            render(time);
+            requestAnimationFrame(loop);
+        }
+        requestAnimationFrame(loop);
+    }
+
+    function isPointVisible(point) {
+        if (point.mention_count < mentionThreshold) return false;
+        return true;
+    }
+
+    function resize() {
+        width = window.innerWidth;
+        height = window.innerHeight;
+        canvas.width = width * devicePixelRatio;
+        canvas.height = height * devicePixelRatio;
+        canvas.style.width = width + 'px';
+        canvas.style.height = height + 'px';
+        ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+    }
+
+    function toScreen(px, py) {
+        const margin = 60;
+        const scale = Math.min((width - margin * 2) / rangeX, (height - margin * 2) / rangeY);
+        const cx = width / 2, cy = height / 2;
+        const mx = (minX + maxX) / 2, my = (minY + maxY) / 2;
+        return [cx + (px - mx) * scale * zoom + offsetX, cy + (py - my) * scale * zoom + offsetY];
+    }
+
+    function fromScreen(sx, sy) {
+        const margin = 60;
+        const scale = Math.min((width - margin * 2) / rangeX, (height - margin * 2) / rangeY);
+        const cx = width / 2, cy = height / 2;
+        const mx = (minX + maxX) / 2, my = (minY + maxY) / 2;
+        return [(sx - cx - offsetX) / (scale * zoom) + mx, (sy - cy - offsetY) / (scale * zoom) + my];
+    }
+
+    function render(time = 0) {
+        // Ease camera state toward targets — gives zoom/wheel/pinch that
+        // floating-through-space feel instead of a hard snap.
+        // Delta-time-aware so 60Hz and 120Hz displays feel the same.
+        const dt = lastFrameTime ? Math.min((time - lastFrameTime) / 1000, 0.1) : 1 / 60;
+        lastFrameTime = time;
+        const ease = 1 - Math.exp(-CAMERA_EASE_RATE * dt);
+        zoom    += (targetZoom    - zoom)    * ease;
+        offsetX += (targetOffsetX - offsetX) * ease;
+        offsetY += (targetOffsetY - offsetY) * ease;
+
+        // Dark space background
+        ctx.fillStyle = '#0a0e1a';
+        ctx.fillRect(0, 0, width, height);
+
+        // Subtle radial gradient for depth
+        const grad = ctx.createRadialGradient(width / 2, height / 2, 0, width / 2, height / 2, Math.max(width, height) * 0.7);
+        grad.addColorStop(0, 'rgba(15, 25, 50, 0.3)');
+        grad.addColorStop(1, 'rgba(5, 8, 15, 0)');
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, width, height);
+
+        if (!data) return;
+
+        // Zoom thresholds for label transitions
+        const clusterLabelFadeIn = 1.5;   // cluster names start appearing
+        const companyLabelStart = 6.0;    // company names start appearing
+        // After companyLabelStart, cluster labels transition to background layer
+
+        // --- Word-wrap cluster name into lines targeting a squarish shape ---
+        function wrapClusterName(name, fontSize) {
+            ctx.font = `700 ${fontSize}px "Baumans", -apple-system, BlinkMacSystemFont, sans-serif`;
+            const words = name.split(' ');
+            if (words.length <= 2) return [name];
+
+            // Try different line counts and pick the most square result
+            let bestLines = [name];
+            let bestRatio = Infinity;
+            for (let nLines = 2; nLines <= Math.min(3, words.length); nLines++) {
+                const lines = [];
+                const wordsPerLine = Math.ceil(words.length / nLines);
+                for (let i = 0; i < words.length; i += wordsPerLine) {
+                    lines.push(words.slice(i, i + wordsPerLine).join(' '));
+                }
+                const maxW = Math.max(...lines.map(l => ctx.measureText(l).width));
+                const totalH = lines.length * fontSize * 1.3;
+                const ratio = Math.abs(Math.log(maxW / totalH));
+                if (ratio < bestRatio) {
+                    bestRatio = ratio;
+                    bestLines = lines;
+                }
+            }
+            return bestLines;
+        }
+
+        // --- Compute nudged cluster label positions to avoid overlap ---
+        function computeClusterLabelPositions(fontSize) {
+            ctx.font = `700 ${fontSize}px "Baumans", -apple-system, BlinkMacSystemFont, sans-serif`;
+            const lineHeight = fontSize * 1.3;
+            const labels = [];
+            for (const cluster of data.clusters) {
+                const hasVisible = data.points.some(p => p.cluster_id === cluster.id && isPointVisible(p));
+                if (!hasVisible) continue;
+                const [sx, sy] = toScreen(cluster.center_x, cluster.center_y);
+                if (sx < -400 || sx > width + 400 || sy < -400 || sy > height + 400) continue;
+                const lines = wrapClusterName(cluster.name, fontSize);
+                const maxW = Math.max(...lines.map(l => ctx.measureText(l).width));
+                const totalH = lines.length * lineHeight;
+                labels.push({
+                    cluster,
+                    lines,
+                    x: sx,
+                    y: sy,
+                    hw: maxW / 2 + 6,
+                    hh: totalH / 2 + 4,
+                    lineHeight,
+                });
+            }
+            // Iterative relaxation — push overlapping labels apart
+            for (let iter = 0; iter < 8; iter++) {
+                for (let i = 0; i < labels.length; i++) {
+                    for (let j = i + 1; j < labels.length; j++) {
+                        const a = labels[i], b = labels[j];
+                        const ox = (a.hw + b.hw) - Math.abs(a.x - b.x);
+                        const oy = (a.hh + b.hh) - Math.abs(a.y - b.y);
+                        if (ox > 0 && oy > 0) {
+                            if (oy < ox) {
+                                const push = oy * 0.52;
+                                if (a.y < b.y) { a.y -= push; b.y += push; }
+                                else { a.y += push; b.y -= push; }
+                            } else {
+                                const push = ox * 0.52;
+                                if (a.x < b.x) { a.x -= push; b.x += push; }
+                                else { a.x += push; b.x -= push; }
+                            }
+                        }
+                    }
+                }
+            }
+            return labels;
+        }
+
+        // --- Draw multi-line centered text ---
+        function drawClusterLabel(lbl, color) {
+            const startY = lbl.y - (lbl.lines.length - 1) * lbl.lineHeight / 2;
+            for (let i = 0; i < lbl.lines.length; i++) {
+                ctx.fillStyle = color;
+                ctx.fillText(lbl.lines[i], lbl.x, startY + i * lbl.lineHeight);
+            }
+        }
+
+        // --- Cluster labels: background layer (drawn behind stars when zoomed in) ---
+        const bgPhase = zoom > companyLabelStart ? Math.min(1, (zoom - companyLabelStart) / 3.0) : 0;
+        if (zoom > clusterLabelFadeIn && bgPhase > 0) {
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            const bgAlpha = 0.2 * (1 - bgPhase * 0.4);
+            const fontSize = Math.min(80, 18 * Math.sqrt(zoom / 2));
+            const labels = computeClusterLabelPositions(fontSize);
+            ctx.font = `800 ${fontSize}px "Baumans", -apple-system, BlinkMacSystemFont, sans-serif`;
+
+            for (const lbl of labels) {
+                drawClusterLabel(lbl, `rgba(60, 120, 180, ${bgAlpha})`);
+            }
+        }
+
+        // Background star field (drawn after bg cluster labels so stars are on top)
+        drawStars(time);
+
+        // --- Cluster boundaries: soft light-blue convex hulls ---
+        for (const cluster of data.clusters) {
+            const boundary = cluster.boundary;
+            if (!boundary || boundary.length < 3) continue;
+            ctx.beginPath();
+            for (let i = 0; i < boundary.length; i++) {
+                const [bx, by] = toScreen(boundary[i][0], boundary[i][1]);
+                if (i === 0) ctx.moveTo(bx, by);
+                else ctx.lineTo(bx, by);
+            }
+            ctx.closePath();
+            ctx.strokeStyle = 'rgba(130, 180, 235, 0.22)';
+            ctx.lineWidth = 1;
+            ctx.stroke();
+        }
+
+        // --- Cluster labels: foreground layer (before they sink to background) ---
+        if (zoom > clusterLabelFadeIn) {
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            const fadeIn = Math.min(1, (zoom - clusterLabelFadeIn) / 1.0);
+            const fgAlpha = Math.max(0, fadeIn * (1 - bgPhase) * 0.6);
+
+            if (fgAlpha > 0.01) {
+                const fontSize = Math.max(13, Math.min(28, 18 * Math.sqrt(zoom / 2)));
+                const labels = computeClusterLabelPositions(fontSize);
+                ctx.font = `700 ${fontSize}px "Baumans", -apple-system, BlinkMacSystemFont, sans-serif`;
+
+                for (const lbl of labels) {
+                    // Shadow
+                    const saved = lbl.x; const savedY = lbl.y;
+                    lbl.x += 1; lbl.y += 1;
+                    drawClusterLabel(lbl, `rgba(0, 0, 0, ${fgAlpha * 0.6})`);
+                    lbl.x = saved; lbl.y = savedY;
+                    // Light blue text
+                    drawClusterLabel(lbl, `rgba(120, 180, 240, ${fgAlpha})`);
+                }
+            }
+        }
+
+        // --- Entity nodes ---
+        for (const point of data.points) {
+            if (!isPointVisible(point)) continue;
+
+            const [sx, sy] = toScreen(point.x, point.y);
+            if (sx < -80 || sx > width + 80 || sy < -80 || sy > height + 80) continue;
+
+            const isSearchMatch = searchTerm && point.name.toLowerCase().includes(searchTerm);
+            const isSearchActive = searchTerm.length > 0;
+            const isHovered = hoveredPoint === point;
+
+            let radius = getRadius(point, zoom);
+            let alpha = 1;
+
+            if (isSearchActive && !isSearchMatch) alpha = 0.06;
+            if (isSearchMatch) radius *= 1.5;
+            if (isHovered) radius *= 1.4;
+
+            // Gentle twinkle — per-node phase so the field shimmers asynchronously.
+            // Bias toward brighter so the mean stays close to 1.
+            const tw = Math.sin(time * point.twinkleSpeed + point.twinklePhase);
+            const twinkle = 1 + tw * point.twinkleDepth * 0.5 - point.twinkleDepth * 0.15;
+            alpha *= twinkle;
+            // Small radius pulse couples with brightness for a more organic shimmer
+            radius *= 1 + tw * 0.05;
+
+            // Uniform warm-white star color — not tied to any data dimension
+            // so it doesn't imply meaning the data doesn't carry.
+            const r = 255, g = 238, b = 200;
+
+            // Diffraction spikes for brighter stars — + shape from the "lens"
+            if (alpha > 0.5 && point.mention_count >= 3) {
+                const spikeAlpha = Math.min(0.8, (point.mention_count - 2) / 12);
+                drawDiffractionSpikes(sx, sy, radius, spikeAlpha * alpha);
+            }
+
+            // Outer glow — larger, stronger, two-layer for a more apparent halo
+            if (alpha > 0.3 && radius > 1.5) {
+                const glowRadius = radius * 5;
+                const glowGrad = ctx.createRadialGradient(sx, sy, radius * 0.2, sx, sy, glowRadius);
+                glowGrad.addColorStop(0,    `rgba(${r}, ${g}, ${b}, ${0.55 * alpha})`);
+                glowGrad.addColorStop(0.25, `rgba(${r}, ${g}, ${b}, ${0.22 * alpha})`);
+                glowGrad.addColorStop(0.6,  `rgba(${r}, ${g}, ${b}, ${0.06 * alpha})`);
+                glowGrad.addColorStop(1,    'rgba(0,0,0,0)');
+                ctx.beginPath();
+                ctx.arc(sx, sy, glowRadius, 0, Math.PI * 2);
+                ctx.fillStyle = glowGrad;
+                ctx.fill();
+            }
+
+            // Core — bright white center fading all the way to black at the edge.
+            // Drawing the black rim explicitly gives the dot a harder, more
+            // photographic falloff against whatever is behind it.
+            ctx.beginPath();
+            ctx.arc(sx, sy, radius, 0, Math.PI * 2);
+            const coreGrad = ctx.createRadialGradient(sx, sy, 0, sx, sy, radius);
+            coreGrad.addColorStop(0,    `rgba(255, 255, 255, ${alpha})`);
+            coreGrad.addColorStop(0.35, `rgba(${r}, ${g}, ${b}, ${alpha * 0.95})`);
+            coreGrad.addColorStop(0.75, `rgba(${r}, ${g}, ${b}, ${alpha * 0.35})`);
+            coreGrad.addColorStop(1,    `rgba(${r}, ${g}, ${b}, 0)`);
+            ctx.fillStyle = coreGrad;
+            ctx.fill();
+
+            if (isHovered || isSearchMatch) {
+                ctx.strokeStyle = '#fff';
+                ctx.lineWidth = 1.5;
+                ctx.stroke();
+            }
+
+            // Company name labels — appear as we zoom past cluster labels
+            const companyAlpha = zoom > companyLabelStart ? Math.min(0.85, (zoom - companyLabelStart) * 0.5) : 0;
+
+            const shouldLabel = (companyAlpha > 0 && point.mention_count >= 2) ||
+                                (zoom > 5 && point.mention_count >= 1) ||
+                                isSearchMatch || isHovered;
+
+            if (shouldLabel && alpha > 0.5) {
+                const fs = Math.min(12, 10 * Math.sqrt(zoom / 4));
+                ctx.font = `600 ${fs}px "Baumans", -apple-system, sans-serif`;
+                ctx.textAlign = 'left';
+                ctx.textBaseline = 'middle';
+                ctx.globalAlpha = isHovered || isSearchMatch ? 0.95 : companyAlpha;
+                ctx.fillStyle = '#fff';
+                ctx.fillText(point.name, sx + radius + 4, sy);
+                ctx.globalAlpha = 1;
+            }
+        }
+
+        // Dither / film-grain overlay — softens gradient banding and gives a
+        // subtle photographic texture. Applied last so it affects everything.
+        drawNoiseOverlay();
+    }
+
+    function findPointAt(mx, my) {
+        if (!data) return null;
+        let closest = null, closestDist = Infinity;
+        for (const point of data.points) {
+            if (!isPointVisible(point)) continue;
+            const [sx, sy] = toScreen(point.x, point.y);
+            const r = getRadius(point, zoom);
+            const dist = Math.sqrt((mx - sx) ** 2 + (my - sy) ** 2);
+            if (dist < r + 4 && dist < closestDist) {
+                closest = point;
+                closestDist = dist;
+            }
+        }
+        return closest;
+    }
+
+    function showTooltip(point, mx, my) {
+        const tooltip = document.getElementById('tooltip');
+        tooltip.querySelector('.name').textContent = point.name;
+        let meta = `${point.category || ''}`;
+        if (point.type) meta += ` \u00b7 ${point.type}`;
+        if (point.location) meta += ` \u00b7 ${point.location}`;
+        meta += ` \u00b7 ${point.mention_count} mention${point.mention_count !== 1 ? 's' : ''}`;
+        tooltip.querySelector('.meta').textContent = meta;
+        const tags = point.tags || [];
+        tooltip.querySelector('.tags').textContent = tags.length ? tags.join(', ') : '';
+        tooltip.querySelector('.desc').textContent = point.description || '';
+
+        let tx = mx + 16, ty = my - 10;
+        if (tx + 360 > width) tx = mx - 370;
+        if (ty + 150 > height) ty = height - 160;
+        if (ty < 10) ty = 10;
+        tooltip.style.left = tx + 'px';
+        tooltip.style.top = ty + 'px';
+        tooltip.style.display = 'block';
+    }
+
+    function hideTooltip() {
+        document.getElementById('tooltip').style.display = 'none';
+    }
+
+    // --- Deep-hover panel: bullets + connector line ---
+    const DEEP_HOVER_DELAY = 2500; // ms
+    let deepHoverTimer = null;
+    let deepHoverPoint = null;
+    const bulletsCache = new Map(); // name -> { title, bullets[] }
+
+    async function fetchBullets(point) {
+        if (bulletsCache.has(point.name)) return bulletsCache.get(point.name);
+        // Bullets are embedded on each point in data.json at build time —
+        // no network call needed. This makes the viz fully static for
+        // Vercel deployment.
+        const raw = (point.bullets || '').split('\n').filter(Boolean);
+        const bullets = raw.map(line => line.replace(/^\s*\d+\.\s*/, '').trim()).filter(Boolean);
+        if (!bullets.length) return null;
+        const entry = { title: point.name, bullets };
+        bulletsCache.set(point.name, entry);
+        return entry;
+    }
+
+    function scheduleDeepHover(point) {
+        cancelDeepHover();
+        deepHoverTimer = setTimeout(() => { triggerDeepHover(point); }, DEEP_HOVER_DELAY);
+    }
+
+    function cancelDeepHover() {
+        if (deepHoverTimer) { clearTimeout(deepHoverTimer); deepHoverTimer = null; }
+    }
+
+    async function triggerDeepHover(point) {
+        if (hoveredPoint !== point) return;
+        const data = await fetchBullets(point);
+        if (!data || hoveredPoint !== point) return;
+        deepHoverPoint = point;
+        showDeepPanel(data);
+    }
+
+    let typewriterToken = 0;  // incremented on each show to cancel prior typer
+
+    function showDeepPanel(data) {
+        const panel = document.getElementById('deep-panel');
+        panel.querySelector('.title').textContent = data.title;
+        const ul = panel.querySelector('ul');
+        ul.innerHTML = '';
+
+        // Kick off typewriter — cancellable via token.
+        const token = ++typewriterToken;
+        runTypewriter(ul, panel, data.bullets, token);
+
+        const tooltip = document.getElementById('tooltip');
+        const tRect = tooltip.getBoundingClientRect();
+
+        // Choose the side of the viewport with more room.
+        const roomRight = width - tRect.right;
+        const roomLeft  = tRect.left;
+        const panelW = 420;
+        const gap = 60;
+
+        let panelLeft, panelTop;
+        let anchor;  // which edge of the tooltip we leave from
+        if (roomRight >= roomLeft) {
+            panelLeft = Math.min(width - panelW - 16, tRect.right + gap);
+            anchor = { x: tRect.right, y: tRect.top + tRect.height / 2, side: 'right' };
+        } else {
+            panelLeft = Math.max(16, tRect.left - panelW - gap);
+            anchor = { x: tRect.left, y: tRect.top + tRect.height / 2, side: 'left' };
+        }
+        // Use ~95% of vertical real estate: pin top at 2.5vh so max-height: 95vh
+        // leaves matching 2.5vh gap at the bottom.
+        panelTop = Math.round(height * 0.025);
+
+        panel.style.left = panelLeft + 'px';
+        panel.style.top = panelTop + 'px';
+        panel.style.display = 'block';
+        // Next frame: fade in + animate line
+        requestAnimationFrame(() => {
+            panel.classList.add('visible');
+            const pRect = panel.getBoundingClientRect();
+            const pAnchor = { x: anchor.side === 'right' ? pRect.left : pRect.right,
+                              y: pRect.top + pRect.height / 2 };
+            const line = document.getElementById('connector-line');
+            line.setAttribute('x1', anchor.x);
+            line.setAttribute('y1', anchor.y);
+            line.setAttribute('x2', pAnchor.x);
+            line.setAttribute('y2', pAnchor.y);
+            const len = Math.hypot(pAnchor.x - anchor.x, pAnchor.y - anchor.y);
+            line.setAttribute('stroke-dasharray', len);
+            line.setAttribute('stroke-dashoffset', len);
+            // Force reflow then animate
+            line.getBoundingClientRect();
+            line.style.transition = 'stroke-dashoffset 450ms ease-out';
+            line.setAttribute('stroke-dashoffset', 0);
+        });
+    }
+
+    function hideDeepPanel() {
+        typewriterToken++;  // invalidate any in-flight typing
+        deepHoverPoint = null;
+        const panel = document.getElementById('deep-panel');
+        panel.classList.remove('visible');
+        panel.style.display = 'none';
+        const line = document.getElementById('connector-line');
+        line.style.transition = 'none';
+        line.setAttribute('stroke-dashoffset', line.getAttribute('stroke-dasharray'));
+    }
+
+    // Old-school-modem typewriter: emit one char at a time across all bullets,
+    // scrolling the panel to keep the live cursor in view.
+    async function runTypewriter(ul, panel, bullets, token) {
+        const CHAR_MS = 14;           // ~70 cps — fast modem feel
+        const PAUSE_BETWEEN = 120;    // ms pause between bullets
+        const END_PAUSE = 320;        // longer pause before the END. line
+        // Live cursor element — moves from line to line as we type
+        const cursor = document.createElement('span');
+        cursor.className = 'cursor';
+        cursor.innerHTML = '&nbsp;';
+
+        const lines = [...bullets, 'END.'];
+        for (let idx = 0; idx < lines.length; idx++) {
+            if (token !== typewriterToken) return;
+            const b = lines[idx];
+            const li = document.createElement('li');
+            ul.appendChild(li);
+            li.appendChild(cursor);
+            for (let i = 0; i < b.length; i++) {
+                if (token !== typewriterToken) return;
+                cursor.insertAdjacentText('beforebegin', b[i]);
+                panel.scrollTop = panel.scrollHeight;
+                await new Promise(r => setTimeout(r, CHAR_MS));
+            }
+            // Longer dramatic pause before the final END. line
+            const pause = (idx === lines.length - 2) ? END_PAUSE : PAUSE_BETWEEN;
+            await new Promise(r => setTimeout(r, pause));
+        }
+        if (token === typewriterToken) cursor.remove();
+    }
+
+    // --- Event handlers ---
+    function onMouseDown(e) {
+        dragging = true;
+        dragStartX = e.clientX;
+        dragStartY = e.clientY;
+    }
+
+    function onMouseMove(e) {
+        if (dragging) {
+            const dx = e.clientX - dragStartX;
+            const dy = e.clientY - dragStartY;
+            // Drag tracks the cursor instantly — otherwise panning feels broken.
+            offsetX += dx;  offsetY += dy;
+            targetOffsetX += dx;  targetOffsetY += dy;
+            dragStartX = e.clientX;
+            dragStartY = e.clientY;
+            hideTooltip();
+            cancelDeepHover();
+            hideDeepPanel();
+            return;
+        }
+        const point = findPointAt(e.clientX, e.clientY);
+        const changed = point !== hoveredPoint;
+        if (changed) {
+            hoveredPoint = point;
+            cancelDeepHover();
+            if (deepHoverPoint && deepHoverPoint !== point) hideDeepPanel();
+            if (point) scheduleDeepHover(point);
+        }
+        if (point) {
+            showTooltip(point, e.clientX, e.clientY);
+            canvas.style.cursor = 'pointer';
+        } else {
+            hideTooltip();
+            hideDeepPanel();
+            canvas.style.cursor = 'grab';
+        }
+    }
+
+    function onMouseUp() { dragging = false; }
+
+    function onWheel(e) {
+        e.preventDefault();
+        // Gentler per-tick factor; the smoothing interpolation eases the
+        // change in over several frames so it feels like drifting.
+        const factor = e.deltaY > 0 ? 0.94 : 1.06;
+        const mx = e.clientX, my = e.clientY;
+        const [px, py] = fromScreen(mx, my);  // world coords under cursor
+        targetZoom = Math.max(MIN_ZOOM, Math.min(50, targetZoom * factor));
+        // Set target offset so the cursor's world point lands at (mx, my)
+        // once zoom settles, keeping zoom anchored to the cursor.
+        const margin = 60;
+        const scale = Math.min((width - margin * 2) / rangeX, (height - margin * 2) / rangeY);
+        const cx = width / 2, cy = height / 2;
+        const mxData = (minX + maxX) / 2, myData = (minY + maxY) / 2;
+        targetOffsetX = mx - cx - (px - mxData) * scale * targetZoom;
+        targetOffsetY = my - cy - (py - myData) * scale * targetZoom;
+    }
+
+    let lastTouchDist = 0;
+    function onTouchStart(e) {
+        if (e.touches.length === 1) {
+            dragging = true;
+            dragStartX = e.touches[0].clientX;
+            dragStartY = e.touches[0].clientY;
+        } else if (e.touches.length === 2) {
+            lastTouchDist = Math.hypot(
+                e.touches[0].clientX - e.touches[1].clientX,
+                e.touches[0].clientY - e.touches[1].clientY
+            );
+        }
+        e.preventDefault();
+    }
+    function onTouchMove(e) {
+        if (e.touches.length === 1 && dragging) {
+            const dx = e.touches[0].clientX - dragStartX;
+            const dy = e.touches[0].clientY - dragStartY;
+            offsetX += dx;  offsetY += dy;
+            targetOffsetX += dx;  targetOffsetY += dy;
+            dragStartX = e.touches[0].clientX;
+            dragStartY = e.touches[0].clientY;
+        } else if (e.touches.length === 2) {
+            const dist = Math.hypot(
+                e.touches[0].clientX - e.touches[1].clientX,
+                e.touches[0].clientY - e.touches[1].clientY
+            );
+            if (lastTouchDist > 0) {
+                targetZoom *= dist / lastTouchDist;
+                targetZoom = Math.max(MIN_ZOOM, Math.min(50, targetZoom));
+            }
+            lastTouchDist = dist;
+        }
+        e.preventDefault();
+    }
+    function onTouchEnd() { dragging = false; lastTouchDist = 0; }
+
+    init();
+    </script>
+</body>
+</html>
