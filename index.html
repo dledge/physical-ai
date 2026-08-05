@@ -1070,9 +1070,9 @@
     // Old-school-modem typewriter: emit one char at a time across all bullets,
     // scrolling the panel to keep the live cursor in view.
     async function runTypewriter(ul, panel, bullets, token) {
-        const CHAR_MS = 14;           // ~70 cps — fast modem feel
-        const PAUSE_BETWEEN = 120;    // ms pause between bullets
-        const END_PAUSE = 320;        // longer pause before the END. line
+        const CHAR_MS = 6;            // ~165 cps — brisk but still typed
+        const PAUSE_BETWEEN = 80;     // ms pause between bullets
+        const END_PAUSE = 250;        // longer pause before the END. line
         // Live cursor element — moves from line to line as we type
         const cursor = document.createElement('span');
         cursor.className = 'cursor';
