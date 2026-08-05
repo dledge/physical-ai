@@ -18,9 +18,38 @@ from config import (  # noqa: E402
     get_openrouter_key,
 )
 
+from dedup_semantic import normalize_key, KNOWN_ALIASES  # noqa: E402
+
 _mongo = MongoClient(MONGO_URL)
 _companies = _mongo[MONGO_DB][COMPANIES_COL]
 _articles = _mongo[MONGO_DB][ARTICLES_COL]
+
+# Alias-key redirects for graph nodes, e.g. "maxim integrated" -> "analog devices"
+_ALIAS_KEYS = {
+    normalize_key(alias): normalize_key(canonical)
+    for canonical, aliases in KNOWN_ALIASES.items()
+    for alias in aliases
+}
+
+
+def _graph_key(name: str) -> str:
+    """Canonical node key: same normalization + alias folding the entity dedup
+    uses, so raw extraction variants ("Analog Devices Inc.") collapse into one
+    graph node instead of appearing beside the canonical entity."""
+    key = normalize_key(name)
+    return _ALIAS_KEYS.get(key, key)
+
+
+def _set_label(labels: dict, key: str, name: str) -> None:
+    """Display label for a node: direct variants of the canonical key beat
+    alias-folded names (so "Analog Devices" wins over "Maxim"); among equals,
+    the shortest form wins (so "Analog Devices" beats "Analog Devices Inc.")."""
+    cur = labels.get(key)
+    if cur is None:
+        labels[key] = name
+        return
+    if (normalize_key(name) != key, len(name)) < (normalize_key(cur) != key, len(cur)):
+        labels[key] = name
 
 # /api/describe LLM — GLM-5.2 via OpenRouter (was Haiku until 2026-08-04)
 DESCRIBE_MODEL = "z-ai/glm-5.2"
@@ -173,7 +202,7 @@ def _score_lookup() -> dict[str, float]:
             continue
         for name in [doc.get("name", "")] + (doc.get("aliases") or []):
             if isinstance(name, str) and name.strip():
-                scores[name.strip().lower()] = s
+                scores[_graph_key(name)] = s
     return scores
 
 
@@ -211,8 +240,8 @@ def _build_graph() -> dict:
                              ("products", "product"),
                              ("datasets", "dataset")):
             for name, desc in _entity_rows(ents, bucket):
-                key = name.lower()
-                labels.setdefault(key, name)
+                key = _graph_key(name)
+                _set_label(labels, key, name)
                 mentions[key] = mentions.get(key, 0) + 1
                 kinds.setdefault(key, kind)
                 if desc and len(desc) > len(descs.get(key, "")) and len(desc) <= 320:
@@ -233,11 +262,11 @@ def _build_graph() -> dict:
             src, tgt = a.strip(), b.strip()
             if direction == "reverse":
                 src, tgt = tgt, src
-            sk, tk = src.lower(), tgt.lower()
+            sk, tk = _graph_key(src), _graph_key(tgt)
             if sk == tk:
                 continue
-            labels.setdefault(sk, src)
-            labels.setdefault(tk, tgt)
+            _set_label(labels, sk, src)
+            _set_label(labels, tk, tgt)
 
             ekey = (sk, tk, rtype)
             edge = edges.get(ekey)
@@ -313,7 +342,7 @@ async def graph_ego(center: str, depth: int = 2, limit: int = 300):
     depth 1 solid and depth 2 faded, per the focus+context pattern.
     """
     g = _build_graph()
-    key = center.strip().lower()
+    key = _graph_key(center)
     if key not in g["labels"]:
         raise HTTPException(status_code=404, detail="Unknown entity")
 
@@ -421,8 +450,8 @@ async def get_graph(
                              ("products", "product"),
                              ("datasets", "dataset")):
             for name, desc in _entity_rows(ents, bucket):
-                key = name.lower()
-                labels.setdefault(key, name)
+                key = _graph_key(name)
+                _set_label(labels, key, name)
                 mentions[key] = mentions.get(key, 0) + 1
                 kinds.setdefault(key, kind)
                 # the same entity is described in every article that mentions
@@ -450,11 +479,11 @@ async def get_graph(
             src, tgt = a.strip(), b.strip()
             if direction == "reverse":
                 src, tgt = tgt, src
-            sk, tk = src.lower(), tgt.lower()
+            sk, tk = _graph_key(src), _graph_key(tgt)
             if sk == tk:
                 continue
-            labels.setdefault(sk, src)
-            labels.setdefault(tk, tgt)
+            _set_label(labels, sk, src)
+            _set_label(labels, tk, tgt)
 
             ekey = (sk, tk, rtype)
             edge = edges.get(ekey)

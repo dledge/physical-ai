@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Physical AI — Entity Map</title>
+    <title>Physical AI: Entity Map</title>
     <meta name="description" content="A visual map of companies and organizations shaping the edge and physical AI ecosystem — from inference silicon to deployed robots — clustered by what they actually do.">
 
     <!-- Open Graph (Facebook, LinkedIn, Slack, iMessage, Discord) -->
@@ -120,7 +120,13 @@
             left: 20px;
             z-index: 50;
         }
-        #controls h1 { font-size: 22px; font-weight: 700; color: #fff; margin-bottom: 16px; }
+        #controls h1 { font-size: 22px; font-weight: 700; color: #fff; margin-bottom: 2px; }
+        #controls .byline {
+            font-size: 11px;
+            color: rgba(255,255,255,0.45);
+            letter-spacing: 0.03em;
+            margin-bottom: 14px;
+        }
 
         #search {
             width: 260px;
@@ -210,7 +216,8 @@
     </div>
 
     <div id="controls">
-        <h1>Physical AI</h1>
+        <h1>Physical AI: Entity Map</h1>
+        <div class="byline">created by Dan Ledger</div>
         <input type="text" id="search" placeholder="Search entities...">
         <div id="filters">
             <label for="mention-slider">Min mentions <span class="val" id="mention-val">2</span></label>
@@ -830,11 +837,13 @@
             const isHovered = hoveredPoint === point;
 
             let radius = getRadius(point, zoom);
-            let alpha = 1;
+            // Slightly translucent so the board art ghosts through and
+            // overlapping dots read as density instead of a white mass.
+            let alpha = 0.78;
 
             if (isSearchActive && !isSearchMatch) alpha = 0.06;
-            if (isSearchMatch) radius *= 1.5;
-            if (isHovered) radius *= 1.4;
+            if (isSearchMatch) { radius *= 1.5; alpha = 1; }
+            if (isHovered) { radius *= 1.4; alpha = 1; }
 
             // Plain white dot, hard edge — size alone carries mention count.
             ctx.beginPath();
