@@ -1,0 +1,937 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Physical AI — Knowledge Graph</title>
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<style>
+  :root {
+    color-scheme: light;
+    --surface-1:      #fcfcfb;
+    --surface-2:      #f2f2ef;
+    --border:         #d9d8d2;
+    --text-primary:   #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted:     #7a796f;
+    --node:           #6f6e66;
+    --fam-capital:    #2a78d6;
+    --fam-alliance:   #eb6834;
+    --fam-rivalry:    #1baf7a;
+    --fam-other:      #b9b8b1;
+    --edge-hot:       #4a3aa7;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) {
+      color-scheme: dark;
+      --surface-1:      #1a1a19;
+      --surface-2:      #242422;
+      --border:         #3a3a37;
+      --text-primary:   #ffffff;
+      --text-secondary: #c3c2b7;
+      --text-muted:     #8e8d84;
+      --node:           #9a998f;
+      --fam-capital:    #3987e5;
+      --fam-alliance:   #d95926;
+      --fam-rivalry:    #199e70;
+      --fam-other:      #4a4a46;
+      --edge-hot:       #9085e9;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --surface-1:      #1a1a19;
+    --surface-2:      #242422;
+    --border:         #3a3a37;
+    --text-primary:   #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted:     #8e8d84;
+    --node:           #9a998f;
+    --fam-capital:    #3987e5;
+    --fam-alliance:   #d95926;
+    --fam-rivalry:    #199e70;
+    --fam-other:      #4a4a46;
+    --edge-hot:       #9085e9;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--surface-1);
+    color: var(--text-primary);
+    font: 13px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    display: flex; overflow: hidden;
+  }
+
+  /* ---- side panel ---- */
+  #panel {
+    width: 290px; flex: none; height: 100%; overflow-y: auto;
+    background: var(--surface-2); border-right: 1px solid var(--border);
+    padding: 14px 14px 28px;
+  }
+  #panel h1 { font-size: 14px; margin: 0 0 2px; letter-spacing: -0.01em; }
+  #panel .sub { color: var(--text-muted); font-size: 11px; margin-bottom: 14px; }
+  .group { margin-bottom: 16px; }
+  .group > label.hdr {
+    display: block; font-size: 11px; text-transform: uppercase;
+    letter-spacing: .06em; color: var(--text-muted); margin-bottom: 6px;
+  }
+  input[type=search], select, button {
+    font: inherit; color: var(--text-primary);
+    background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 6px; padding: 5px 8px; width: 100%;
+  }
+  button { cursor: pointer; }
+  button:hover { border-color: var(--text-muted); }
+  .row { display: flex; gap: 6px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 4px; }
+  .chip {
+    font-size: 11px; padding: 3px 7px; border-radius: 999px; cursor: pointer;
+    border: 1px solid var(--border); background: var(--surface-1);
+    color: var(--text-secondary); user-select: none;
+  }
+  .chip[aria-pressed="true"] {
+    background: var(--edge-hot); border-color: var(--edge-hot); color: #fff;
+  }
+  .chip .n { opacity: .6; margin-left: 3px; }
+  .legend { display: flex; flex-direction: column; gap: 4px; }
+  .legend div { display: flex; align-items: center; gap: 7px; color: var(--text-secondary); }
+  .sw { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+  .sw.ln { width: 16px; height: 3px; border-radius: 2px; }
+  .note { color: var(--text-muted); font-size: 10.5px; margin-top: 6px; line-height: 1.35; }
+  .shp { width: 11px; height: 11px; flex: none; background: var(--node); }
+  .shp.circ { border-radius: 50%; }
+  .shp.sq   { border-radius: 1px; }
+  .shp.dia  { transform: rotate(45deg) scale(.82); border-radius: 1px; }
+  .shp.tri  { clip-path: polygon(50% 0, 100% 100%, 0 100%); }
+  .shp.hex  { clip-path: polygon(25% 5%, 75% 5%, 100% 50%, 75% 95%, 25% 95%, 0 50%); }
+  table { border-collapse: collapse; width: 100%; font-size: 11.5px; }
+  th, td { text-align: left; padding: 3px 4px; border-bottom: 1px solid var(--border); }
+  th { color: var(--text-muted); font-weight: 500; }
+  td.num { text-align: right; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+  tbody tr { cursor: pointer; }
+  tbody tr:hover td { background: var(--surface-1); }
+  .stat { color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+
+  /* ---- canvas ---- */
+  #stage { flex: 1; position: relative; min-width: 0; }
+  canvas { display: block; width: 100%; height: 100%; cursor: grab; }
+  canvas.dragging { cursor: grabbing; }
+  #tip {
+    position: absolute; pointer-events: none; opacity: 0; transition: opacity .1s;
+    max-width: 320px; background: var(--surface-2); color: var(--text-primary);
+    border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px;
+    box-shadow: 0 4px 16px rgba(0,0,0,.18); font-size: 12px; z-index: 5;
+  }
+  #tip .t { font-weight: 600; margin-bottom: 2px; }
+  #tip .m { color: var(--text-muted); font-size: 11px; }
+  #tip .desc {
+    margin-top: 5px; padding-top: 5px; border-top: 1px solid var(--border);
+    color: var(--text-secondary); font-size: 11.5px; line-height: 1.4;
+  }
+  #tip .quote {
+    margin-top: 5px; padding-left: 8px; border-left: 2px solid var(--border);
+    color: var(--text-muted); font-size: 11px; line-height: 1.4;
+  }
+  #tip .desc strong { color: var(--text-primary); }
+  #tip .chipline {
+    display: inline-flex; align-items: center; gap: 6px; margin-top: 4px;
+    font-size: 11.5px; color: var(--text-primary);
+  }
+  #tip .dot { width: 16px; height: 3px; border-radius: 2px; flex: none; }
+  #tip ul { margin: 6px 0 0; padding: 0; list-style: none; }
+  #tip li { margin: 0 0 5px; color: var(--text-secondary); line-height: 1.35; }
+  #tip li:last-child { margin-bottom: 0; }
+  #tip .ty { color: var(--text-primary); font-weight: 600; font-size: 11px; }
+  #hud {
+    position: absolute; left: 12px; bottom: 12px; font-size: 11px;
+    color: var(--text-muted); background: var(--surface-2);
+    border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px;
+  }
+  #themeBtn { position: absolute; right: 12px; top: 12px; width: auto; padding: 4px 9px; font-size: 11px; }
+  #stage.paneopen #themeBtn { right: 332px; }
+
+  /* ---- right detail pane ---- */
+  #detail {
+    position: absolute; top: 0; right: 0; bottom: 0; width: 320px; z-index: 6;
+    background: var(--surface-2); border-left: 1px solid var(--border);
+    overflow-y: auto; padding: 14px 16px 26px; font-size: 12.5px;
+  }
+  #detail .t { font-weight: 600; font-size: 15px; margin: 0 22px 2px 0; }
+  #detail .m { color: var(--text-muted); font-size: 11px; }
+  #detail .pin { color: var(--edge-hot); }
+  #detail .desc {
+    margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border);
+    color: var(--text-secondary); line-height: 1.45;
+  }
+  #detail h3 {
+    font-size: 11px; text-transform: uppercase; letter-spacing: .06em;
+    color: var(--text-muted); margin: 14px 0 6px; font-weight: 500;
+  }
+  #detail ul { margin: 0; padding: 0; list-style: none; }
+  #detail li { margin: 0 0 7px; color: var(--text-secondary); line-height: 1.4; }
+  #detail .ty { color: var(--text-primary); font-weight: 600; font-size: 11.5px; }
+  #detail a { color: var(--fam-capital); text-decoration: none; }
+  #detail a:hover { text-decoration: underline; }
+  #detail .src { font-size: 11.5px; margin-bottom: 6px; line-height: 1.35; word-break: break-all; }
+  #detailClose {
+    position: absolute; top: 8px; right: 8px; width: 24px; height: 24px;
+    padding: 0; line-height: 1; font-size: 14px; border-radius: 6px;
+  }
+</style>
+</head>
+<body>
+
+<div id="panel">
+  <h1>Physical AI — Knowledge Graph</h1>
+  <div class="sub" id="subtitle">loading…</div>
+
+  <div class="group">
+    <label class="hdr" for="q">Search</label>
+    <input type="search" id="q" placeholder="company, person, product…" autocomplete="off">
+  </div>
+
+  <div class="group">
+    <label class="hdr" for="deg">Min connections — <span class="stat" id="degVal">2</span></label>
+    <input type="range" id="deg" min="1" max="12" value="2" style="width:100%">
+  </div>
+
+  <div class="group">
+    <label class="hdr" for="men">Min mentions — <span class="stat" id="menVal">1</span></label>
+    <input type="range" id="men" min="1" max="20" value="1" style="width:100%">
+  </div>
+
+  <div class="group">
+    <label class="hdr" for="score">Min relevance — <span class="stat" id="scoreVal">off</span></label>
+    <input type="range" id="score" min="0" max="0.9" step="0.05" value="0" style="width:100%">
+    <div class="note">Pipeline relevance score, organizations only — people and
+      products stay as long as something they're linked to survives.</div>
+  </div>
+
+  <div class="group">
+    <label class="hdr">Edge type <span style="text-transform:none;letter-spacing:0">(click to isolate)</span></label>
+    <div class="chips" id="types"></div>
+  </div>
+
+  <div class="group">
+    <label class="hdr">Relationship</label>
+    <div class="legend">
+      <div><span class="sw ln" style="background:var(--fam-capital)"></span>capital &amp; ownership</div>
+      <div><span class="sw ln" style="background:var(--fam-alliance)"></span>alliance</div>
+      <div><span class="sw ln" style="background:var(--fam-rivalry)"></span>rivalry</div>
+      <div><span class="sw ln" style="background:var(--fam-other)"></span>other</div>
+    </div>
+    <div class="note">
+      Type is labelled on the line — zoom in, or hover a node.<br>
+      <b>→ arrow</b> = direction confirmed by the source.
+      <b>Plain line</b> = mutual, or the sources disagree on direction.<br>
+      Hover any line to read the sentence it came from.
+    </div>
+  </div>
+
+  <div class="group">
+    <label class="hdr">Entity</label>
+    <div class="legend">
+      <div><span class="shp circ"></span>organization</div>
+      <div><span class="shp sq"></span>person</div>
+      <div><span class="shp dia"></span>product</div>
+      <div><span class="shp hex"></span>dataset</div>
+      <div><span class="shp tri"></span>concept</div>
+    </div>
+  </div>
+
+  <div class="group">
+    <label class="hdr">View</label>
+    <div class="row" style="margin-bottom:6px">
+      <button id="reheat">Re-layout</button>
+      <button id="reset">Reset view</button>
+    </div>
+    <button id="refresh">Refresh from MongoDB</button>
+    <label style="display:flex;align-items:center;gap:6px;margin-top:7px;color:var(--text-secondary)">
+      <input type="checkbox" id="auto" style="width:auto"> auto-refresh every 30s
+    </label>
+  </div>
+
+  <div class="group">
+    <label class="hdr">Most connected</label>
+    <table>
+      <thead><tr><th>Entity</th><th class="num">Links</th></tr></thead>
+      <tbody id="top"></tbody>
+    </table>
+  </div>
+</div>
+
+<div id="stage">
+  <canvas id="c"></canvas>
+  <div id="tip"></div>
+  <div id="hud">scroll to zoom · drag to pan · click a node to pin its details</div>
+  <button id="themeBtn">theme</button>
+  <div id="detail" hidden>
+    <button id="detailClose" title="close">×</button>
+    <div id="detailBody"></div>
+  </div>
+</div>
+
+<script>
+const API = "/api/graph";
+const canvas = document.getElementById("c");
+const ctx = canvas.getContext("2d");
+const tip = document.getElementById("tip");
+
+// Arrowheads are drawn only where the extracted data supports a direction.
+// The relationship type sometimes names entity_1's role and sometimes
+// entity_2's, and three types are inconsistent even with themselves — those
+// come back as "ambiguous"/"symmetric" and are drawn as plain lines so the
+// picture never claims a causality the source text doesn't support.
+const DIRECTED = new Set(["forward", "reverse"]);
+
+let raw = {nodes: [], links: [], meta: {}};
+let nodes = [], links = [], sim = null;
+let transform = d3.zoomIdentity;
+let hover = null, hoverEdge = null, selected = null;
+let neighbours = new Set(), matches = new Set();
+let activeTypes = new Set();
+let W = 0, H = 0;
+
+// Canvas silently ignores an empty strokeStyle/fillStyle and keeps whatever was
+// set before it — so a missing custom property would paint every edge the same
+// colour rather than failing loudly. Fall back to a literal instead.
+const CSS_FALLBACK = {
+  "--fam-capital": "#2a78d6", "--fam-alliance": "#eb6834",
+  "--fam-rivalry": "#1baf7a", "--fam-other": "#b9b8b1",
+  "--edge-hot": "#4a3aa7", "--node": "#6f6e66",
+  "--surface-1": "#fcfcfb", "--text-primary": "#0b0b0b",
+  "--text-secondary": "#52514e",
+};
+function css(v) {
+  const got = getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+  if (got) return got;
+  console.warn(`graph.html: CSS variable ${v} is empty — using fallback`);
+  return CSS_FALLBACK[v] || "#888";
+}
+
+// 14 raw relationship types can't be colour-coded legibly — a node-link graph
+// puts arbitrary pairs of edges side by side, and only three categorical hues
+// survive that in both light and dark. So types collapse into three families
+// plus a neutral "other", and the exact type is carried by the midpoint label
+// (which doubles as the secondary encoding the tight colour band requires).
+// The vocabulary is open-ended — 400+ distinct strings, most of them one-offs
+// like "integration partner" or "acquired by" — so matching is by substring
+// rather than an exact table, which classifies the long tail correctly.
+const FAMILY_RULES = [
+  [/invest|acquir|subsidiar|sharehold|parent|owner|ownership|stake|backer|fund/, "capital"],
+  [/partner|collaborat|alliance|joint venture|consorti|member|participant|technology provider|research/, "alliance"],
+  [/compet|rival/, "rivalry"],
+];
+const _famCache = new Map();
+function familyOf(t) {
+  const k = (t || "").toLowerCase();
+  if (_famCache.has(k)) return _famCache.get(k);
+  let f = "other";
+  for (const [re, name] of FAMILY_RULES) if (re.test(k)) { f = name; break; }
+  _famCache.set(k, f);
+  return f;
+}
+const FAMCOL = () => ({
+  capital:  css("--fam-capital"),
+  alliance: css("--fam-alliance"),
+  rivalry:  css("--fam-rivalry"),
+  other:    css("--fam-other"),
+});
+
+function resize() {
+  const r = canvas.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  W = r.width; H = r.height;
+  canvas.width = Math.round(W * dpr);
+  canvas.height = Math.round(H * dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  draw();
+}
+window.addEventListener("resize", resize);
+
+// ---- data ----------------------------------------------------------------
+async function load({incremental = false} = {}) {
+  const deg = document.getElementById("deg").value;
+  const men = document.getElementById("men").value;
+  const score = document.getElementById("score").value;
+  const params = new URLSearchParams({
+    min_degree: deg, min_mentions: men, min_score: score, limit_nodes: 2000,
+  });
+  if (activeTypes.size) params.set("types", [...activeTypes].join(","));
+  if (!incremental) document.getElementById("subtitle").textContent = "loading…";
+
+  let data;
+  try {
+    const res = await fetch(`${API}?${params}`);
+    if (!res.ok) throw new Error(res.status);
+    data = await res.json();
+  } catch (err) {
+    // a failed poll must not blank a working graph
+    document.getElementById("subtitle").textContent =
+      `refresh failed (${err.message}) — showing last good data`;
+    return;
+  }
+
+  const prevNodes = nodes.length, prevLinks = links.length;
+  // carry positions across a refresh so the layout grows instead of resetting
+  const prev = new Map(nodes.map(n => [n.id, n]));
+  raw = data;
+
+  nodes = raw.nodes.map(n => {
+    const old = prev.get(n.id);
+    return old ? Object.assign(old, n) : {...n};
+  });
+  const byId = new Map(nodes.map(n => [n.id, n]));
+  links = raw.links
+    .filter(l => byId.has(l.source) && byId.has(l.target))
+    .map(l => ({...l, source: byId.get(l.source), target: byId.get(l.target)}));
+
+  const maxDeg = nodes.reduce((m, n) => Math.max(m, n.degree || 0), 1);
+  rScale = d3.scaleSqrt().domain([1, maxDeg]).range([R_MIN, R_MAX]).clamp(true);
+
+  const added = nodes.length - prevNodes, addedL = links.length - prevLinks;
+  document.getElementById("subtitle").innerHTML =
+    `${raw.meta.node_count.toLocaleString()} entities · ` +
+    `${raw.meta.link_count.toLocaleString()} relationships` +
+    (incremental && (added > 0 || addedL > 0)
+      ? ` <span style="color:var(--fam-alliance)">+${added}/+${addedL}</span>` : "") +
+    `<br>live from MongoDB · ${new Date().toLocaleTimeString()}`;
+
+  renderTypeChips();
+  renderTopTable();
+  // an incremental update nudges the existing layout; a filter change rebuilds
+  layout(incremental && prevNodes > 0 ? 0.25 : 1);
+}
+
+// Counts come back filtered once a type is isolated, so the full vocabulary is
+// captured on the first unfiltered load and kept — otherwise isolating a type
+// would hide every chip you'd use to switch to a different one.
+let allTypes = {};
+
+function renderTypeChips() {
+  const box = document.getElementById("types");
+  box.innerHTML = "";
+  const counts = raw.meta.edge_types || {};
+  if (!activeTypes.size) allTypes = counts;
+  [...new Set([...Object.keys(allTypes), ...activeTypes])]
+    .sort((a, b) => (allTypes[b] || 0) - (allTypes[a] || 0)).slice(0, 16)
+    .forEach(t => {
+      const b = document.createElement("button");
+      b.className = "chip";
+      b.setAttribute("aria-pressed", activeTypes.has(t));
+      b.innerHTML = `${t}<span class="n">${allTypes[t] || ""}</span>`;
+      b.onclick = () => {
+        activeTypes.has(t) ? activeTypes.delete(t) : activeTypes.add(t);
+        load();
+      };
+      box.appendChild(b);
+    });
+}
+
+function renderTopTable() {
+  const tb = document.getElementById("top");
+  tb.innerHTML = "";
+  raw.nodes.slice(0, 15).forEach(n => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${escapeHtml(n.label)}</td><td class="num">${n.degree}</td>`;
+    tr.onclick = () => focusNode(n.id);
+    tb.appendChild(tr);
+  });
+}
+
+const escapeHtml = s => String(s).replace(/[&<>"]/g, c =>
+  ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
+
+// Extracted descriptions are usually 1–3 sentences. Take the first, unless it
+// is so short it carries nothing, in which case keep the second as well.
+// Abbreviations ("Inc.", "U.S.") are the reason for the lookahead.
+function firstSentence(text) {
+  const parts = String(text).split(/(?<=[.!?])\s+(?=[A-Z0-9])/);
+  let out = parts[0] || "";
+  if (out.length < 45 && parts[1]) out += " " + parts[1];
+  return out.length > 200 ? out.slice(0, 197).trimEnd() + "…" : out;
+}
+
+// ---- layout --------------------------------------------------------------
+function layout(alpha = 1) {
+  if (sim) sim.stop();
+  const r = radius;
+  sim = d3.forceSimulation(nodes)
+    .force("link", d3.forceLink(links).id(d => d.id)
+      .distance(d => 26 + 60 / (1 + d.count))
+      .strength(0.35))
+    .force("charge", d3.forceManyBody().strength(d => -34 - d.degree * 5).distanceMax(420))
+    .force("center", d3.forceCenter(W / 2, H / 2))
+    .force("collide", d3.forceCollide().radius(d => r(d) + 2.5))
+    .force("x", d3.forceX(W / 2).strength(0.02))
+    .force("y", d3.forceY(H / 2).strength(0.02))
+    .alpha(alpha).alphaDecay(0.022)
+    .on("tick", draw);
+}
+
+// ---- draw ----------------------------------------------------------------
+// A bare formula grows without limit as the scan adds edges — hubs kept
+// inflating all through a long run. A scale pinned to the current maximum
+// degree keeps the biggest node a fixed size no matter how large the graph
+// gets, so only the *relative* sizing changes. Area still tracks degree
+// (sqrt on the radius), which is the honest encoding for a magnitude.
+const R_MIN = 2.5, R_MAX = 11;
+let rScale = d3.scaleSqrt().domain([1, 10]).range([R_MIN, R_MAX]).clamp(true);
+function radius(n) { return rScale(n.degree || 1); }
+
+function draw() {
+  const fam = FAMCOL();
+  const hot = css("--edge-hot"), surface = css("--surface-1");
+  const nodeCol = css("--node");
+  const textPri = css("--text-primary"), textSec = css("--text-secondary");
+
+  ctx.save();
+  ctx.clearRect(0, 0, W, H);
+  ctx.translate(transform.x, transform.y);
+  ctx.scale(transform.k, transform.k);
+
+  const focused = selected || hover;
+  const dim = focused || matches.size > 0;
+
+  // edges
+  ctx.lineCap = "round";
+  const labelled = [];
+  for (const l of links) {
+    const inFocus = focused &&
+      (l.source.id === focused.id || l.target.id === focused.id);
+    // an isolated type that lands in the neutral bucket would render as a grey
+    // screen, so give the accent to whatever the filter is currently showing
+    const f = familyOf(l.type);
+    const base = (activeTypes.size && f === "other") ? hot : fam[f];
+    const isHovered = hoverEdge === l;
+    // A hovered edge keeps its family colour — that colour *is* the answer to
+    // "what kind of line is this", so replacing it with an accent would throw
+    // away the encoding at the exact moment it's being asked about. Emphasis
+    // comes from a halo and weight instead.
+    if (isHovered) {
+      ctx.globalAlpha = 0.25;
+      ctx.strokeStyle = base;
+      ctx.lineWidth = 7 / transform.k;
+      ctx.beginPath();
+      ctx.moveTo(l.source.x, l.source.y);
+      ctx.lineTo(l.target.x, l.target.y);
+      ctx.stroke();
+    }
+    // Family colour survives focus and hover alike. Emphasis is carried by
+    // weight and by dimming everything else — never by recolouring, which
+    // would erase the one channel that says what kind of relationship it is.
+    ctx.globalAlpha = isHovered ? 1 : dim ? (inFocus ? 1 : 0.06) : 0.7;
+    ctx.strokeStyle = base;
+    ctx.lineWidth = (isHovered ? 2.4 : inFocus ? 1.9
+                     : 0.9 + Math.min(l.count - 1, 3) * 0.4) / transform.k;
+    ctx.beginPath();
+    ctx.moveTo(l.source.x, l.source.y);
+    ctx.lineTo(l.target.x, l.target.y);
+    ctx.stroke();
+    // arrowheads once you're zoomed in enough to read the graph, not only on
+    // focus — otherwise direction is invisible until you click something
+    if ((inFocus || isHovered || (!dim && transform.k > 1.25)) && DIRECTED.has(l.direction))
+      arrowhead(l, base);
+    if (inFocus || isHovered || (!dim && transform.k > 1.25))
+      labelled.push([l, inFocus || isHovered]);
+  }
+
+  // edge labels at the midpoint — capped so a dense view stays interactive
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  for (const [l, inFocus] of labelled.slice(0, 500)) {
+    edgeLabel(l, inFocus ? textPri : textSec, surface, inFocus);
+  }
+
+  // nodes — colour is spent on edges, so kind is carried by shape
+  for (const n of nodes) {
+    const isFocus = focused && (n.id === focused.id || neighbours.has(n.id));
+    const isMatch = matches.size > 0 && matches.has(n.id);
+    ctx.globalAlpha = dim ? (isFocus || isMatch ? 1 : 0.12) : 1;
+    ctx.fillStyle = nodeCol;
+    nodeShape(n, radius(n));
+    ctx.fill();
+    // surface ring keeps overlapping marks separable
+    ctx.lineWidth = 1.6 / transform.k;
+    ctx.strokeStyle = surface;
+    ctx.stroke();
+    if (focused && n.id === focused.id) {
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, radius(n) + 3.5 / transform.k, 0, 6.2832);
+      ctx.strokeStyle = hot;
+      ctx.lineWidth = 2 / transform.k;
+      ctx.stroke();
+    }
+  }
+
+  // labels — always on for the hubs (three light-mode slots sit under 3:1,
+  // so identity must not rest on colour alone), plus anything in focus
+  ctx.globalAlpha = 1;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "bottom";
+  const labelFloor = transform.k > 1.7 ? 2 : transform.k > 1.1 ? 5 : 9;
+  for (const n of nodes) {
+    const isFocus = focused && (n.id === focused.id || neighbours.has(n.id));
+    const show = isFocus || matches.has(n.id) || (!dim && n.degree >= labelFloor);
+    if (!show) continue;
+    ctx.font = `${(n.degree >= 9 ? 12 : 11) / transform.k}px ui-sans-serif, system-ui, sans-serif`;
+    ctx.fillStyle = isFocus || matches.has(n.id) ? textPri : textSec;
+    ctx.fillText(n.label, n.x, n.y - radius(n) - 3 / transform.k);
+  }
+  ctx.restore();
+}
+
+function nodeShape(n, r) {
+  const {x, y} = n;
+  ctx.beginPath();
+  switch (n.kind) {
+    case "person":                       // square
+      ctx.rect(x - r * 0.88, y - r * 0.88, r * 1.76, r * 1.76);
+      break;
+    case "product":                      // diamond
+      ctx.moveTo(x, y - r * 1.15); ctx.lineTo(x + r * 1.15, y);
+      ctx.lineTo(x, y + r * 1.15);      ctx.lineTo(x - r * 1.15, y);
+      ctx.closePath();
+      break;
+    case "organization":                 // circle
+      ctx.arc(x, y, r, 0, 6.2832);
+      break;
+    case "dataset": {                    // hexagon
+      for (let i = 0; i < 6; i++) {
+        const a = Math.PI / 6 + i * Math.PI / 3;
+        const px = x + Math.cos(a) * r * 1.1, py = y + Math.sin(a) * r * 1.1;
+        i ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
+      }
+      ctx.closePath();
+      break;
+    }
+    default:                             // concept — triangle
+      ctx.moveTo(x, y - r * 1.2);
+      ctx.lineTo(x + r * 1.1, y + r * 0.8);
+      ctx.lineTo(x - r * 1.1, y + r * 0.8);
+      ctx.closePath();
+  }
+}
+
+// Type text laid along the line, upright, with a surface-coloured knockout so
+// it stays readable where it crosses the edge it belongs to.
+function edgeLabel(l, ink, surface, strong) {
+  const mx = (l.source.x + l.target.x) / 2;
+  const my = (l.source.y + l.target.y) / 2;
+  const dx = l.target.x - l.source.x, dy = l.target.y - l.source.y;
+  if (Math.hypot(dx, dy) * transform.k < 46) return;   // no room for text
+  let a = Math.atan2(dy, dx);
+  if (a > Math.PI / 2 || a < -Math.PI / 2) a += Math.PI;  // never upside-down
+  const size = (strong ? 10.5 : 9.5) / transform.k;
+
+  ctx.save();
+  ctx.translate(mx, my);
+  ctx.rotate(a);
+  ctx.font = `${size}px ui-sans-serif, system-ui, sans-serif`;
+  ctx.lineWidth = 3.2 / transform.k;
+  ctx.strokeStyle = surface;
+  ctx.lineJoin = "round";
+  ctx.strokeText(l.type, 0, 0);
+  ctx.fillStyle = ink;
+  ctx.fillText(l.type, 0, 0);
+  ctx.restore();
+}
+
+function arrowhead(l, colour) {
+  const dx = l.target.x - l.source.x, dy = l.target.y - l.source.y;
+  const len = Math.hypot(dx, dy) || 1;
+  const ux = dx / len, uy = dy / len;
+  const tipX = l.target.x - ux * (radius(l.target) + 1.5);
+  const tipY = l.target.y - uy * (radius(l.target) + 1.5);
+  const s = 7 / transform.k;
+  ctx.save();
+  ctx.fillStyle = colour;
+  ctx.beginPath();
+  ctx.moveTo(tipX, tipY);
+  ctx.lineTo(tipX - ux * s - uy * s * 0.5, tipY - uy * s + ux * s * 0.5);
+  ctx.lineTo(tipX - ux * s + uy * s * 0.5, tipY - uy * s - ux * s * 0.5);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
+// ---- interaction ---------------------------------------------------------
+const zoom = d3.zoom().scaleExtent([0.08, 9]).on("zoom", e => {
+  transform = e.transform;
+  draw();
+});
+d3.select(canvas).call(zoom);
+
+function pick(px, py) {
+  const [x, y] = transform.invert([px, py]);
+  let best = null, bestD = Infinity;
+  for (const n of nodes) {
+    const d = (n.x - x) ** 2 + (n.y - y) ** 2;
+    const r = radius(n) + 6 / transform.k;
+    if (d < r * r && d < bestD) { best = n; bestD = d; }
+  }
+  return best;
+}
+
+// Nodes win ties; edges are only picked when the cursor isn't over one.
+function pickEdge(px, py) {
+  const [x, y] = transform.invert([px, py]);
+  const tol = 5 / transform.k;
+  let best = null, bestD = tol * tol;
+  for (const l of links) {
+    const ax = l.source.x, ay = l.source.y, bx = l.target.x, by = l.target.y;
+    const vx = bx - ax, vy = by - ay;
+    const len2 = vx * vx + vy * vy;
+    if (!len2) continue;
+    let t = ((x - ax) * vx + (y - ay) * vy) / len2;
+    t = Math.max(0, Math.min(1, t));
+    const dx = x - (ax + t * vx), dy = y - (ay + t * vy);
+    const d = dx * dx + dy * dy;
+    if (d < bestD) { best = l; bestD = d; }
+  }
+  return best;
+}
+
+// Turn (source, type, target, direction) into something a human can read.
+// This is the whole point of tracking direction confidence: an arrow that
+// means "Sequoia invested in Reflection" should say so, and one whose
+// direction the source text doesn't pin down should admit it.
+function relationSentence(l) {
+  const s = l.source.label, t = l.target.label, ty = l.type;
+  if (l.direction === "symmetric")
+    return `${s} and ${t} are described as <strong>${escapeHtml(ty)}</strong>s.`;
+  if (l.direction === "ambiguous")
+    return `${s} and ${t} are linked as <strong>${escapeHtml(ty)}</strong> — ` +
+           `the source wording doesn't settle which way round.`;
+  return `<strong>${escapeHtml(s)}</strong> → <strong>${escapeHtml(t)}</strong> ` +
+         `(${escapeHtml(ty)})`;
+}
+
+function neighboursOf(node) {
+  const s = new Set();
+  if (!node) return s;
+  for (const l of links) {
+    if (l.source.id === node.id) s.add(l.target.id);
+    else if (l.target.id === node.id) s.add(l.source.id);
+  }
+  return s;
+}
+
+canvas.addEventListener("mousemove", e => {
+  const r = canvas.getBoundingClientRect();
+  const mx = e.clientX - r.left, my = e.clientY - r.top;
+  const n = pick(mx, my);
+  if (n !== hover) {
+    hover = n;
+    if (!selected) neighbours = neighboursOf(n);
+    draw();
+  }
+  if (n) {
+    if (hoverEdge) { hoverEdge = null; draw(); }
+    tip.style.opacity = 0;
+    if (!selected) renderDetail(n, false);   // hover previews unless pinned
+    return;
+  }
+
+  const l = pickEdge(mx, my);
+  if (l !== hoverEdge) { hoverEdge = l; draw(); }
+  if (l) showEdgeTip(l, mx, my);
+  else tip.style.opacity = 0;
+});
+canvas.addEventListener("mouseleave", () => {
+  hover = null; hoverEdge = null; tip.style.opacity = 0;
+  if (!selected) { neighbours = new Set(); hideDetail(); }
+  draw();
+});
+canvas.addEventListener("click", e => {
+  const r = canvas.getBoundingClientRect();
+  const n = pick(e.clientX - r.left, e.clientY - r.top);
+  selected = (selected && n && selected.id === n.id) ? null : n;
+  neighbours = neighboursOf(selected || hover);
+  if (selected) renderDetail(selected, true);
+  else if (hover) renderDetail(hover, false);
+  else hideDetail();
+  draw();
+});
+
+// ---- right detail pane ----------------------------------------------------
+// Node details live in a fixed pane instead of the cursor-chasing tooltip: the
+// full relationship list gets room to breathe, and source links are actually
+// clickable. Hover previews; click pins.
+const detail = document.getElementById("detail");
+const detailBody = document.getElementById("detailBody");
+
+// one row per relationship type rather than per edge — a hub like Nvidia has
+// 60+ edges but only a handful of distinct types, so grouping turns a
+// scrolling list into a few lines
+function relationGroups(n) {
+  const rel = links.filter(l => l.source.id === n.id || l.target.id === n.id);
+  const groups = new Map();
+  for (const l of rel) {
+    const other = l.source.id === n.id ? l.target.label : l.source.label;
+    const dir = DIRECTED.has(l.direction)
+      ? (l.source.id === n.id ? "→" : "←") : "—";
+    const key = `${l.type} ${dir}`;
+    if (!groups.has(key)) groups.set(key, {type: l.type, dir, names: []});
+    groups.get(key).names.push(other);
+  }
+  return [...groups.values()].sort((a, b) => b.names.length - a.names.length);
+}
+
+function sourceLinks(n) {
+  return (n.articles || []).map(u => {
+    let label = u;
+    try {
+      const p = new URL(u);
+      label = p.hostname.replace(/^www\./, "") + p.pathname.replace(/\/$/, "");
+    } catch { /* keep the raw url */ }
+    if (label.length > 64) label = label.slice(0, 61) + "…";
+    return `<div class="src"><a href="${escapeHtml(u)}" target="_blank" ` +
+           `rel="noopener noreferrer">${escapeHtml(label)}</a></div>`;
+  }).join("");
+}
+
+function renderDetail(n, pinned) {
+  const rows = relationGroups(n).map(g => {
+    const shown = g.names.slice(0, 12).map(escapeHtml).join(", ");
+    const extra = g.names.length > 12 ? ` <span class="m">+${g.names.length - 12}</span>` : "";
+    return `<li><span class="ty">${g.dir} ${escapeHtml(g.type)}` +
+           (g.names.length > 1 ? ` <span class="m">(${g.names.length})</span>` : "") +
+           `</span><br>${shown}${extra}</li>`;
+  }).join("");
+  const srcs = sourceLinks(n);
+
+  detailBody.innerHTML =
+    `<div class="t">${escapeHtml(n.label)}</div>` +
+    `<div class="m">${n.kind} · ${n.degree} connection${n.degree === 1 ? "" : "s"} · ` +
+    `${n.mentions} mention${n.mentions === 1 ? "" : "s"}` +
+    (n.score != null ? ` · relevance ${n.score.toFixed(2)}` : "") +
+    (pinned ? ` · <span class="pin">pinned</span>` : "") + `</div>` +
+    (n.desc ? `<div class="desc">${escapeHtml(n.desc)}</div>` : "") +
+    (rows ? `<h3>Relationships</h3><ul>${rows}</ul>` : "") +
+    (srcs ? `<h3>Sources</h3>${srcs}` : "");
+  detail.hidden = false;
+  document.getElementById("stage").classList.add("paneopen");
+}
+
+function hideDetail() {
+  detail.hidden = true;
+  document.getElementById("stage").classList.remove("paneopen");
+}
+
+document.getElementById("detailClose").onclick = () => {
+  selected = null;
+  neighbours = new Set();
+  hideDetail();
+  draw();
+};
+
+const DIR_NOTE = {
+  forward:   "arrow direction confirmed by the source wording",
+  reverse:   "arrow direction confirmed (stored reversed, flipped here)",
+  symmetric: "mutual relationship — drawn without an arrow",
+  ambiguous: "direction varies between sources — drawn without an arrow",
+};
+
+const FAM_LABEL = {
+  capital: "capital & ownership", alliance: "alliance",
+  rivalry: "rivalry", other: "other",
+};
+
+function showEdgeTip(l, x, y) {
+  const f = familyOf(l.type);
+  const colour = (activeTypes.size && f === "other")
+    ? css("--edge-hot") : css(`--fam-${f}`);
+  // the chip repeats the line's own colour next to its exact type, so the
+  // colour→meaning mapping is reinforced where it's being asked about
+  const chip =
+    `<span class="chipline"><span class="dot" style="background:${colour}"></span>` +
+    `<strong>${escapeHtml(l.type)}</strong>` +
+    `<span class="m"> · ${FAM_LABEL[f]}</span></span>`;
+
+  tip.innerHTML =
+    `<div class="t">${escapeHtml(l.source.label)} — ${escapeHtml(l.target.label)}</div>` +
+    chip +
+    `<div class="m" style="margin-top:3px">${DIR_NOTE[l.direction] || l.direction}` +
+    (l.count > 1 ? ` · reported in ${l.count} articles` : "") + `</div>` +
+    `<div class="desc">${relationSentence(l)}</div>` +
+    (l.description ? `<div class="quote">${escapeHtml(l.description)}</div>` : "");
+  positionTip(x, y);
+}
+
+function positionTip(x, y) {
+  tip.style.opacity = 1;
+  const tw = tip.offsetWidth, th = tip.offsetHeight;
+  tip.style.left = Math.min(x + 14, W - tw - 8) + "px";
+  tip.style.top = Math.max(8, Math.min(y + 14, H - th - 8)) + "px";
+}
+
+function focusNode(id) {
+  const n = nodes.find(v => v.id === id);
+  if (!n) return;
+  selected = n;
+  neighbours = neighboursOf(n);
+  renderDetail(n, true);
+  const k = Math.max(transform.k, 1.6);
+  d3.select(canvas).transition().duration(600).call(
+    zoom.transform,
+    d3.zoomIdentity.translate(W / 2, H / 2).scale(k).translate(-n.x, -n.y)
+  );
+}
+
+// ---- controls ------------------------------------------------------------
+document.getElementById("q").addEventListener("input", e => {
+  const q = e.target.value.trim().toLowerCase();
+  matches = new Set();
+  if (q.length >= 2) {
+    for (const n of nodes) if (n.id.includes(q)) matches.add(n.id);
+  }
+  if (matches.size === 1) focusNode([...matches][0]);
+  draw();
+});
+document.getElementById("deg").addEventListener("input", e => {
+  document.getElementById("degVal").textContent = e.target.value;
+});
+document.getElementById("deg").addEventListener("change", load);
+document.getElementById("men").addEventListener("input", e => {
+  document.getElementById("menVal").textContent = e.target.value;
+});
+document.getElementById("men").addEventListener("change", load);
+document.getElementById("score").addEventListener("input", e => {
+  const v = +e.target.value;
+  document.getElementById("scoreVal").textContent = v > 0 ? v.toFixed(2) : "off";
+});
+document.getElementById("score").addEventListener("change", load);
+document.getElementById("refresh").onclick = () => load();
+
+// Polling pauses while a node is selected or a search is active, so the view
+// never shifts under you mid-read.
+let autoTimer = null;
+document.getElementById("auto").addEventListener("change", e => {
+  clearInterval(autoTimer);
+  autoTimer = e.target.checked ? setInterval(() => {
+    if (!selected && !matches.size && document.visibilityState === "visible")
+      load({incremental: true});
+  }, 30000) : null;
+});
+document.getElementById("reheat").onclick = () => sim && sim.alpha(0.8).restart();
+document.getElementById("reset").onclick = () => {
+  selected = null; neighbours = new Set(); matches = new Set();
+  hideDetail();
+  document.getElementById("q").value = "";
+  d3.select(canvas).transition().duration(450).call(zoom.transform, d3.zoomIdentity);
+};
+document.getElementById("themeBtn").onclick = () => {
+  const cur = document.documentElement.getAttribute("data-theme");
+  const next = cur === "dark" ? "light" : cur === "light" ? "dark"
+    : (matchMedia("(prefers-color-scheme: dark)").matches ? "light" : "dark");
+  document.documentElement.setAttribute("data-theme", next);
+  draw();
+};
+
+resize();
+load();
+</script>
+</body>
+</html>

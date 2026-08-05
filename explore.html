@@ -1,0 +1,671 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Physical AI — Explore</title>
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<style>
+  :root {
+    color-scheme: light;
+    --surface-1:#fcfcfb; --surface-2:#f2f2ef; --border:#d9d8d2;
+    --text-primary:#0b0b0b; --text-secondary:#52514e; --text-muted:#7a796f;
+    --node:#6f6e66; --node-center:#0b0b0b;
+    --fam-capital:#2a78d6; --fam-alliance:#eb6834; --fam-rivalry:#1baf7a;
+    --fam-other:#b9b8b1; --edge-hot:#4a3aa7;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) {
+      color-scheme: dark;
+      --surface-1:#1a1a19; --surface-2:#242422; --border:#3a3a37;
+      --text-primary:#ffffff; --text-secondary:#c3c2b7; --text-muted:#8e8d84;
+      --node:#9a998f; --node-center:#ffffff;
+      --fam-capital:#3987e5; --fam-alliance:#d95926; --fam-rivalry:#199e70;
+      --fam-other:#4a4a46; --edge-hot:#9085e9;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --surface-1:#1a1a19; --surface-2:#242422; --border:#3a3a37;
+    --text-primary:#ffffff; --text-secondary:#c3c2b7; --text-muted:#8e8d84;
+    --node:#9a998f; --node-center:#ffffff;
+    --fam-capital:#3987e5; --fam-alliance:#d95926; --fam-rivalry:#199e70;
+    --fam-other:#4a4a46; --edge-hot:#9085e9;
+  }
+
+  * { box-sizing: border-box; }
+  /* Must come with !important: the `hidden` attribute is only `display:none`
+     in the UA stylesheet, so any author `display` rule (#landing is flex,
+     #top is flex, canvas is block) silently outranks it and the element
+     stays on screen even when .hidden is true. */
+  [hidden] { display: none !important; }
+  html, body { height:100%; margin:0; }
+  body {
+    background: var(--surface-1); color: var(--text-primary);
+    font: 13px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    overflow: hidden;
+  }
+
+  /* ---- landing ---- */
+  #landing {
+    position:absolute; inset:0; display:flex; flex-direction:column;
+    align-items:center; justify-content:center; gap:14px; padding:24px;
+    background: var(--surface-1); z-index:20;
+  }
+  #landing h1 { font-size:26px; margin:0; letter-spacing:-0.02em; font-weight:600; }
+  #landing p { color:var(--text-muted); margin:0 0 6px; font-size:13px; text-align:center; }
+  .searchwrap { position:relative; width:min(520px, 92vw); }
+  input[type=search] {
+    width:100%; font:15px/1.4 inherit; color:var(--text-primary);
+    background:var(--surface-2); border:1px solid var(--border);
+    border-radius:10px; padding:11px 13px;
+  }
+  input[type=search]:focus { outline:none; border-color:var(--text-muted); }
+  /* both dropdowns — the landing one (#results0) and the top-bar one.
+     These must be absolutely positioned: in normal flow they reflow the
+     layout as results arrive, which moves the row out from under the cursor
+     between mousedown and mouseup so the click never lands. */
+  #results, #results0 {
+    position:absolute; left:0; right:0; top:calc(100% + 6px); z-index:30;
+    background:var(--surface-2); border:1px solid var(--border);
+    border-radius:10px; overflow:hidden; max-height:52vh; overflow-y:auto;
+    box-shadow:0 8px 28px rgba(0,0,0,.18);
+  }
+  #results:empty, #results0:empty { display:none; }
+  .res { padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border); }
+  .res:last-child { border-bottom:none; }
+  .res:hover, .res.sel { background:var(--surface-1); }
+  .res .nm { font-weight:600; }
+  .res .meta { color:var(--text-muted); font-size:11px; }
+  .res .ds { color:var(--text-secondary); font-size:11.5px; margin-top:2px;
+             display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+  .seeds { display:flex; flex-wrap:wrap; gap:6px; justify-content:center; max-width:560px; }
+  .seed {
+    font-size:12px; padding:4px 10px; border-radius:999px; cursor:pointer;
+    border:1px solid var(--border); background:var(--surface-2); color:var(--text-secondary);
+  }
+  .seed:hover { border-color:var(--text-muted); color:var(--text-primary); }
+
+  /* ---- explorer ---- */
+  #top {
+    position:absolute; top:0; left:0; right:0; height:52px; z-index:10;
+    display:flex; align-items:center; gap:12px; padding:0 14px;
+    background:var(--surface-2); border-bottom:1px solid var(--border);
+  }
+  #top .searchwrap { width:min(340px, 40vw); }
+  #top input[type=search] { padding:6px 10px; font-size:13px; border-radius:7px; }
+  #trail { display:flex; align-items:center; gap:5px; overflow:hidden; flex:1; font-size:12px; }
+  #trail .crumb {
+    padding:3px 8px; border-radius:999px; background:var(--surface-1);
+    border:1px solid var(--border); cursor:pointer; white-space:nowrap;
+    color:var(--text-secondary);
+  }
+  #trail .crumb:hover { color:var(--text-primary); }
+  #trail .crumb.now { background:var(--edge-hot); border-color:var(--edge-hot); color:#fff; cursor:default; }
+  #trail .sep { color:var(--text-muted); }
+  .tbtn {
+    font:inherit; font-size:11px; padding:4px 9px; border-radius:6px; cursor:pointer;
+    background:var(--surface-1); border:1px solid var(--border); color:var(--text-primary);
+  }
+  canvas { position:absolute; top:52px; left:0; width:100%; height:calc(100% - 52px); display:block; cursor:grab; }
+  #legend {
+    position:absolute; left:12px; bottom:12px; z-index:6; font-size:11px;
+    background:var(--surface-2); border:1px solid var(--border);
+    border-radius:8px; padding:8px 10px; color:var(--text-secondary);
+  }
+  #legend .row { display:flex; align-items:center; gap:7px; margin:2px 0; }
+  #legend .ln { width:16px; height:3px; border-radius:2px; flex:none; }
+  #legend .hint { color:var(--text-muted); margin-top:6px; max-width:210px; line-height:1.35; }
+  #tip {
+    position:absolute; pointer-events:none; opacity:0; transition:opacity .1s; z-index:8;
+    max-width:330px; background:var(--surface-2); color:var(--text-primary);
+    border:1px solid var(--border); border-radius:8px; padding:8px 10px;
+    box-shadow:0 4px 16px rgba(0,0,0,.18); font-size:12px;
+  }
+  #tip .t { font-weight:600; margin-bottom:2px; }
+  #tip .m { color:var(--text-muted); font-size:11px; }
+  #tip .desc { margin-top:5px; padding-top:5px; border-top:1px solid var(--border);
+               color:var(--text-secondary); font-size:11.5px; line-height:1.4; }
+  #tip .quote { margin-top:5px; padding-left:8px; border-left:2px solid var(--border);
+                color:var(--text-muted); font-size:11px; line-height:1.4; }
+  #tip .chipline { display:inline-flex; align-items:center; gap:6px; margin-top:4px; font-size:11.5px; }
+  #tip .dot { width:16px; height:3px; border-radius:2px; flex:none; }
+  #themeBtn { position:absolute; right:12px; top:60px; z-index:9; }
+  body.paneopen #themeBtn { right:332px; }
+
+  /* ---- right detail pane ---- */
+  #detail {
+    position:absolute; top:52px; right:0; bottom:0; width:320px; z-index:7;
+    background:var(--surface-2); border-left:1px solid var(--border);
+    overflow-y:auto; padding:14px 16px 26px; font-size:12.5px;
+  }
+  #detail .t { font-weight:600; font-size:15px; margin:0 22px 2px 0; }
+  #detail .m { color:var(--text-muted); font-size:11px; }
+  #detail .desc {
+    margin-top:8px; padding-top:8px; border-top:1px solid var(--border);
+    color:var(--text-secondary); line-height:1.45;
+  }
+  #detail h3 {
+    font-size:11px; text-transform:uppercase; letter-spacing:.06em;
+    color:var(--text-muted); margin:14px 0 6px; font-weight:500;
+  }
+  #detail .grp { margin:0 0 7px; color:var(--text-secondary); line-height:1.4; }
+  #detail .ty { color:var(--text-primary); font-weight:600; font-size:11.5px; }
+  #detail a { color:var(--fam-capital); text-decoration:none; }
+  #detail a:hover { text-decoration:underline; }
+  #detail .src { font-size:11.5px; margin-bottom:6px; line-height:1.35; word-break:break-all; }
+  #detailClose {
+    position:absolute; top:8px; right:8px; width:24px; height:24px;
+    padding:0; line-height:1; font-size:14px; border-radius:6px;
+  }
+</style>
+</head>
+<body>
+
+<div id="landing">
+  <h1>Explore the physical AI graph</h1>
+  <p>Search for a company, person, or product to see what it's connected to.</p>
+  <div class="searchwrap">
+    <input type="search" id="q0" placeholder="Nvidia, Prophesee, Figure AI…" autocomplete="off" autofocus>
+    <div id="results0"></div>
+  </div>
+  <div class="seeds" id="seeds"></div>
+</div>
+
+<div id="top" hidden>
+  <div class="searchwrap">
+    <input type="search" id="q" placeholder="search…" autocomplete="off">
+    <div id="results"></div>
+  </div>
+  <div id="trail"></div>
+  <button class="tbtn" id="back">← back</button>
+  <button class="tbtn" id="home">home</button>
+</div>
+
+<canvas id="c" hidden></canvas>
+<button class="tbtn" id="themeBtn" hidden>theme</button>
+
+<div id="legend" hidden>
+  <div class="row"><span class="ln" style="background:var(--fam-capital)"></span>capital &amp; ownership</div>
+  <div class="row"><span class="ln" style="background:var(--fam-alliance)"></span>alliance</div>
+  <div class="row"><span class="ln" style="background:var(--fam-rivalry)"></span>rivalry</div>
+  <div class="row"><span class="ln" style="background:var(--fam-other)"></span>other</div>
+  <div class="hint">Inner ring = direct connections. Outer ring = two hops, faded.
+    Click any node to re-centre on it.</div>
+</div>
+
+<div id="detail" hidden>
+  <button class="tbtn" id="detailClose" title="close">×</button>
+  <div id="detailBody"></div>
+</div>
+
+<div id="tip"></div>
+
+<script>
+const canvas = document.getElementById("c"), ctx = canvas.getContext("2d");
+const tip = document.getElementById("tip");
+
+const CSS_FALLBACK = {
+  "--fam-capital":"#2a78d6","--fam-alliance":"#eb6834","--fam-rivalry":"#1baf7a",
+  "--fam-other":"#b9b8b1","--edge-hot":"#4a3aa7","--node":"#6f6e66",
+  "--node-center":"#0b0b0b","--surface-1":"#fcfcfb",
+  "--text-primary":"#0b0b0b","--text-secondary":"#52514e",
+};
+function css(v) {
+  const got = getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+  return got || CSS_FALLBACK[v] || "#888";
+}
+
+const FAMILY_RULES = [
+  [/invest|acquir|subsidiar|sharehold|parent|owner|ownership|stake|backer|fund/, "capital"],
+  [/partner|collaborat|alliance|joint venture|consorti|member|participant|technology provider|research/, "alliance"],
+  [/compet|rival/, "rivalry"],
+];
+const _famCache = new Map();
+function familyOf(t) {
+  const k = (t || "").toLowerCase();
+  if (_famCache.has(k)) return _famCache.get(k);
+  let f = "other";
+  for (const [re, n] of FAMILY_RULES) if (re.test(k)) { f = n; break; }
+  _famCache.set(k, f); return f;
+}
+const FAM_LABEL = {capital:"capital & ownership", alliance:"alliance", rivalry:"rivalry", other:"other"};
+const DIRECTED = new Set(["forward", "reverse"]);
+const DIR_NOTE = {
+  forward:"direction confirmed by the source",
+  reverse:"direction confirmed (stored reversed, flipped here)",
+  symmetric:"mutual — drawn without an arrow",
+  ambiguous:"sources disagree on direction — drawn without an arrow",
+};
+const escapeHtml = s => String(s).replace(/[&<>"]/g, c =>
+  ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+function firstSentence(t) {
+  const p = String(t).split(/(?<=[.!?])\s+(?=[A-Z0-9])/);
+  let o = p[0] || "";
+  if (o.length < 45 && p[1]) o += " " + p[1];
+  return o.length > 200 ? o.slice(0, 197).trimEnd() + "…" : o;
+}
+
+let nodes = [], links = [], sim = null, centerId = null, centerNode = null;
+let transform = d3.zoomIdentity, hover = null, hoverEdge = null;
+let history = [], W = 0, H = 0;
+
+const R_MIN = 2.5, R_MAX = 10;
+let rScale = d3.scaleSqrt().domain([1, 10]).range([R_MIN, R_MAX]).clamp(true);
+const radius = n => n.hop === 0 ? Math.max(rScale(n.degree || 1), 7) : rScale(n.degree || 1);
+const RING = () => Math.min(W, H) * 0.30;
+
+function resize() {
+  const dpr = window.devicePixelRatio || 1;
+  W = canvas.clientWidth; H = canvas.clientHeight;
+  canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  if (centerNode) { centerNode.fx = W / 2; centerNode.fy = H / 2; }
+  draw();
+}
+window.addEventListener("resize", resize);
+
+// ---- search ---------------------------------------------------------------
+function wireSearch(inputId, resultsId, onPick) {
+  const input = document.getElementById(inputId);
+  const box = document.getElementById(resultsId);
+  let items = [], sel = -1, timer = null;
+
+  const render = () => {
+    box.innerHTML = items.map((r, i) =>
+      `<div class="res ${i === sel ? "sel" : ""}" data-i="${i}">
+         <div class="nm">${escapeHtml(r.label)}</div>
+         <div class="meta">${r.kind} · ${r.degree} connection${r.degree === 1 ? "" : "s"}</div>
+         ${r.desc ? `<div class="ds">${escapeHtml(firstSentence(r.desc))}</div>` : ""}
+       </div>`).join("");
+    // mousedown, not click: a click needs mousedown and mouseup on the same
+    // element, which a re-render or any layout shift between them breaks.
+    [...box.querySelectorAll(".res")].forEach(el =>
+      el.addEventListener("mousedown", ev => {
+        ev.preventDefault();          // keep focus, suppress the follow-up click
+        const r = items[+el.dataset.i];
+        if (!r) return;
+        box.innerHTML = ""; input.value = "";
+        onPick(r.id);
+      }));
+  };
+
+  input.addEventListener("input", () => {
+    clearTimeout(timer);
+    const q = input.value.trim();
+    if (q.length < 2) { items = []; box.innerHTML = ""; return; }
+    timer = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/graph/search?q=${encodeURIComponent(q)}`);
+        items = (await res.json()).results; sel = -1; render();
+      } catch { /* leave the last list up rather than blanking it */ }
+    }, 160);
+  });
+  input.addEventListener("keydown", e => {
+    if (!items.length) return;
+    if (e.key === "ArrowDown") { sel = Math.min(sel + 1, items.length - 1); render(); e.preventDefault(); }
+    else if (e.key === "ArrowUp") { sel = Math.max(sel - 1, 0); render(); e.preventDefault(); }
+    else if (e.key === "Enter") {
+      const r = items[sel >= 0 ? sel : 0];
+      if (r) { box.innerHTML = ""; input.value = ""; onPick(r.id); }
+    } else if (e.key === "Escape") { box.innerHTML = ""; }
+  });
+  document.addEventListener("click", e => {
+    if (!box.contains(e.target) && e.target !== input) box.innerHTML = "";
+  });
+}
+
+// ---- load an ego network --------------------------------------------------
+async function center(id, {push = true} = {}) {
+  let data;
+  try {
+    const res = await fetch(`/api/graph/ego?center=${encodeURIComponent(id)}&depth=2`);
+    if (!res.ok) throw new Error(res.status === 404 ? "not found" : res.status);
+    data = await res.json();
+  } catch (err) {
+    if (!centerId) alert(`Could not load "${id}": ${err.message}`);
+    return;
+  }
+
+  if (push && centerId && centerId !== data.center) history.push(centerId);
+  centerId = data.center;
+
+  document.getElementById("landing").hidden = true;
+  for (const el of ["top", "c", "legend", "themeBtn"])
+    document.getElementById(el).hidden = false;
+  if (!W) resize();
+
+  // keep positions of nodes that survive the re-centre, so the graph morphs
+  // rather than teleporting
+  const prev = new Map(nodes.map(n => [n.id, n]));
+  const ring = RING();
+  nodes = data.nodes.map(n => {
+    const old = prev.get(n.id);
+    const base = old || {
+      x: W / 2 + (Math.random() - 0.5) * ring, y: H / 2 + (Math.random() - 0.5) * ring,
+    };
+    return Object.assign(base, n, {fx: null, fy: null});
+  });
+  const byId = new Map(nodes.map(n => [n.id, n]));
+  links = data.links.filter(l => byId.has(l.source) && byId.has(l.target))
+                    .map(l => ({...l, source: byId.get(l.source), target: byId.get(l.target)}));
+
+  centerNode = byId.get(centerId);
+  centerNode.fx = W / 2; centerNode.fy = H / 2;
+
+  const maxDeg = nodes.reduce((m, n) => Math.max(m, n.degree || 0), 1);
+  rScale = d3.scaleSqrt().domain([1, maxDeg]).range([R_MIN, R_MAX]).clamp(true);
+
+  renderTrail(data);
+  showNodeDetail(centerNode);
+  layout();
+  transform = d3.zoomIdentity;
+  d3.select(canvas).call(zoom.transform, d3.zoomIdentity);
+}
+
+function renderTrail(data) {
+  const el = document.getElementById("trail");
+  const trail = [...history.slice(-3), centerId];
+  el.innerHTML = trail.map((id, i) => {
+    const isNow = i === trail.length - 1;
+    const label = isNow
+      ? (nodes.find(n => n.id === id) || {}).label || id
+      : id;
+    return `<span class="crumb ${isNow ? "now" : ""}" data-id="${escapeHtml(id)}">${escapeHtml(label)}</span>`;
+  }).join('<span class="sep">›</span>');
+  el.querySelectorAll(".crumb:not(.now)").forEach(c =>
+    c.onclick = () => {
+      const i = history.lastIndexOf(c.dataset.id);
+      if (i >= 0) history.length = i;
+      center(c.dataset.id, {push: false});
+    });
+  const m = data.meta;
+  el.insertAdjacentHTML("beforeend",
+    `<span class="sep" style="margin-left:8px">${m.total_neighbours} direct · ` +
+    `${m.node_count} shown${m.truncated ? " (trimmed)" : ""}</span>`);
+}
+
+// ---- layout ---------------------------------------------------------------
+function layout() {
+  if (sim) sim.stop();
+  const ring = RING();
+  sim = d3.forceSimulation(nodes)
+    .force("link", d3.forceLink(links).id(d => d.id).distance(38).strength(0.12))
+    .force("charge", d3.forceManyBody().strength(-90).distanceMax(460))
+    // concentric rings make "one hop" vs "two hops" a spatial fact, not a
+    // colour you have to decode
+    .force("radial", d3.forceRadial(d => d.hop * ring, W / 2, H / 2).strength(0.92))
+    .force("collide", d3.forceCollide().radius(d => radius(d) + 3.5))
+    .alpha(0.9).alphaDecay(0.028)
+    .on("tick", draw);
+}
+
+// ---- draw -----------------------------------------------------------------
+function draw() {
+  const fam = {capital:css("--fam-capital"), alliance:css("--fam-alliance"),
+               rivalry:css("--fam-rivalry"), other:css("--fam-other")};
+  const surface = css("--surface-1"), nodeCol = css("--node"),
+        centerCol = css("--node-center"), hot = css("--edge-hot"),
+        textPri = css("--text-primary"), textSec = css("--text-secondary");
+
+  ctx.save();
+  ctx.clearRect(0, 0, W, H);
+  ctx.translate(transform.x, transform.y);
+  ctx.scale(transform.k, transform.k);
+
+  // ring guides
+  const ring = RING();
+  ctx.globalAlpha = 0.5; ctx.strokeStyle = css("--border");
+  ctx.lineWidth = 1 / transform.k;
+  for (const d of [1, 2]) {
+    ctx.beginPath(); ctx.arc(W / 2, H / 2, d * ring, 0, 6.2832); ctx.stroke();
+  }
+
+  // depth 2 fades — that is the whole point of the view
+  const alphaFor = n => n.hop >= 2 ? 0.34 : 1;
+
+  ctx.lineCap = "round";
+  for (const l of links) {
+    const outer = Math.max(l.source.hop, l.target.hop) >= 2;
+    const isHov = hoverEdge === l;
+    const base = fam[familyOf(l.type)];
+    if (isHov) {
+      ctx.globalAlpha = 0.25; ctx.strokeStyle = base; ctx.lineWidth = 7 / transform.k;
+      ctx.beginPath(); ctx.moveTo(l.source.x, l.source.y); ctx.lineTo(l.target.x, l.target.y); ctx.stroke();
+    }
+    ctx.globalAlpha = isHov ? 1 : outer ? 0.22 : 0.75;
+    ctx.strokeStyle = base;
+    ctx.lineWidth = (isHov ? 2.4 : outer ? 0.7 : 1.2) / transform.k;
+    ctx.beginPath(); ctx.moveTo(l.source.x, l.source.y); ctx.lineTo(l.target.x, l.target.y); ctx.stroke();
+    if (DIRECTED.has(l.direction) && (!outer || isHov)) arrowhead(l, base);
+  }
+
+  for (const n of nodes) {
+    ctx.globalAlpha = alphaFor(n);
+    ctx.fillStyle = n.hop === 0 ? centerCol : nodeCol;
+    nodeShape(n, radius(n));
+    ctx.fill();
+    ctx.lineWidth = 1.6 / transform.k; ctx.strokeStyle = surface; ctx.stroke();
+    if (hover === n) {
+      ctx.beginPath(); ctx.arc(n.x, n.y, radius(n) + 3.5 / transform.k, 0, 6.2832);
+      ctx.strokeStyle = hot; ctx.lineWidth = 2 / transform.k; ctx.stroke();
+    }
+  }
+
+  ctx.textAlign = "center"; ctx.textBaseline = "bottom";
+  for (const n of nodes) {
+    if (n.hop >= 2 && transform.k < 1.3 && hover !== n) continue;
+    ctx.globalAlpha = alphaFor(n);
+    ctx.font = `${(n.hop === 0 ? 13 : 11) / transform.k}px ui-sans-serif, system-ui, sans-serif`;
+    ctx.fillStyle = n.hop === 0 ? textPri : textSec;
+    ctx.lineWidth = 3 / transform.k; ctx.strokeStyle = surface; ctx.lineJoin = "round";
+    ctx.strokeText(n.label, n.x, n.y - radius(n) - 3 / transform.k);
+    ctx.fillText(n.label, n.x, n.y - radius(n) - 3 / transform.k);
+  }
+  ctx.restore();
+}
+
+function nodeShape(n, r) {
+  const {x, y} = n;
+  ctx.beginPath();
+  switch (n.kind) {
+    case "person":  ctx.rect(x - r * .88, y - r * .88, r * 1.76, r * 1.76); break;
+    case "product":
+      ctx.moveTo(x, y - r * 1.15); ctx.lineTo(x + r * 1.15, y);
+      ctx.lineTo(x, y + r * 1.15); ctx.lineTo(x - r * 1.15, y); ctx.closePath(); break;
+    case "organization": ctx.arc(x, y, r, 0, 6.2832); break;
+    case "dataset": {
+      for (let i = 0; i < 6; i++) {
+        const a = Math.PI / 6 + i * Math.PI / 3;
+        const px = x + Math.cos(a) * r * 1.1, py = y + Math.sin(a) * r * 1.1;
+        i ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
+      }
+      ctx.closePath();
+      break;
+    }
+    default:
+      ctx.moveTo(x, y - r * 1.2); ctx.lineTo(x + r * 1.1, y + r * .8);
+      ctx.lineTo(x - r * 1.1, y + r * .8); ctx.closePath();
+  }
+}
+
+function arrowhead(l, colour) {
+  const dx = l.target.x - l.source.x, dy = l.target.y - l.source.y;
+  const len = Math.hypot(dx, dy) || 1, ux = dx / len, uy = dy / len;
+  const tx = l.target.x - ux * (radius(l.target) + 1.5);
+  const ty = l.target.y - uy * (radius(l.target) + 1.5);
+  const s = 6.5 / transform.k;
+  ctx.fillStyle = colour;
+  ctx.beginPath();
+  ctx.moveTo(tx, ty);
+  ctx.lineTo(tx - ux * s - uy * s * .5, ty - uy * s + ux * s * .5);
+  ctx.lineTo(tx - ux * s + uy * s * .5, ty - uy * s - ux * s * .5);
+  ctx.closePath(); ctx.fill();
+}
+
+// ---- interaction ----------------------------------------------------------
+const zoom = d3.zoom().scaleExtent([0.25, 6]).on("zoom", e => { transform = e.transform; draw(); });
+d3.select(canvas).call(zoom);
+
+function pick(px, py) {
+  const [x, y] = transform.invert([px, py]);
+  let best = null, bd = Infinity;
+  for (const n of nodes) {
+    const d = (n.x - x) ** 2 + (n.y - y) ** 2, r = radius(n) + 7 / transform.k;
+    if (d < r * r && d < bd) { best = n; bd = d; }
+  }
+  return best;
+}
+function pickEdge(px, py) {
+  const [x, y] = transform.invert([px, py]);
+  const tol = 5 / transform.k; let best = null, bd = tol * tol;
+  for (const l of links) {
+    const ax = l.source.x, ay = l.source.y, vx = l.target.x - ax, vy = l.target.y - ay;
+    const len2 = vx * vx + vy * vy; if (!len2) continue;
+    let t = ((x - ax) * vx + (y - ay) * vy) / len2; t = Math.max(0, Math.min(1, t));
+    const dx = x - (ax + t * vx), dy = y - (ay + t * vy), d = dx * dx + dy * dy;
+    if (d < bd) { best = l; bd = d; }
+  }
+  return best;
+}
+
+canvas.addEventListener("mousemove", e => {
+  const r = canvas.getBoundingClientRect();
+  const mx = e.clientX - r.left, my = e.clientY - r.top;
+  const n = pick(mx, my);
+  if (n !== hover) { hover = n; draw(); }
+  canvas.style.cursor = n && n.hop > 0 ? "pointer" : "grab";
+  if (n) {
+    if (hoverEdge) { hoverEdge = null; draw(); }
+    tip.style.opacity = 0;
+    return showNodeDetail(n);
+  }
+  const l = pickEdge(mx, my);
+  if (l !== hoverEdge) { hoverEdge = l; draw(); }
+  if (l) showEdgeTip(l, mx, my); else tip.style.opacity = 0;
+});
+canvas.addEventListener("mouseleave", () => {
+  hover = null; hoverEdge = null; tip.style.opacity = 0; draw();
+});
+canvas.addEventListener("click", e => {
+  const r = canvas.getBoundingClientRect();
+  const n = pick(e.clientX - r.left, e.clientY - r.top);
+  if (n && n.hop > 0) { tip.style.opacity = 0; center(n.id); }
+});
+
+function positionTip(x, y) {
+  tip.style.opacity = 1;
+  const tw = tip.offsetWidth, th = tip.offsetHeight;
+  tip.style.left = Math.min(x + 14, W - tw - 8) + "px";
+  tip.style.top = Math.max(60, Math.min(y + 66, H - th + 20)) + "px";
+}
+
+// ---- right detail pane -----------------------------------------------------
+// Node details live in a fixed pane rather than the cursor-chasing tooltip:
+// the full relationship list fits, and source links are clickable. The pane is
+// sticky — it keeps the last node until another is hovered or it's closed.
+const detail = document.getElementById("detail");
+const detailBody = document.getElementById("detailBody");
+
+function showNodeDetail(n) {
+  const rel = links.filter(l => l.source.id === n.id || l.target.id === n.id);
+  const groups = new Map();
+  for (const l of rel) {
+    const other = l.source.id === n.id ? l.target.label : l.source.label;
+    const dir = DIRECTED.has(l.direction) ? (l.source.id === n.id ? "→" : "←") : "—";
+    const k = `${l.type} ${dir}`;
+    if (!groups.has(k)) groups.set(k, {type: l.type, dir, names: []});
+    groups.get(k).names.push(other);
+  }
+  const ordered = [...groups.values()].sort((a, b) => b.names.length - a.names.length);
+  const rows = ordered.map(g => {
+    const shown = g.names.slice(0, 12).map(escapeHtml).join(", ");
+    const extra = g.names.length > 12 ? ` <span class="m">+${g.names.length - 12}</span>` : "";
+    return `<div class="grp"><span class="ty">${g.dir} ${escapeHtml(g.type)}` +
+           (g.names.length > 1 ? ` <span class="m">(${g.names.length})</span>` : "") +
+           `</span><br>${shown}${extra}</div>`;
+  }).join("");
+  const srcs = (n.articles || []).map(u => {
+    let label = u;
+    try {
+      const p = new URL(u);
+      label = p.hostname.replace(/^www\./, "") + p.pathname.replace(/\/$/, "");
+    } catch { /* keep the raw url */ }
+    if (label.length > 64) label = label.slice(0, 61) + "…";
+    return `<div class="src"><a href="${escapeHtml(u)}" target="_blank" ` +
+           `rel="noopener noreferrer">${escapeHtml(label)}</a></div>`;
+  }).join("");
+
+  detailBody.innerHTML =
+    `<div class="t">${escapeHtml(n.label)}</div>` +
+    `<div class="m">${n.kind} · ${n.degree} total connection${n.degree === 1 ? "" : "s"}` +
+    (n.score != null ? ` · relevance ${n.score.toFixed(2)}` : "") +
+    (n.hop > 0 ? ` · ${n.hop} hop${n.hop === 1 ? "" : "s"} away` : " · centre") + `</div>` +
+    (n.desc ? `<div class="desc">${escapeHtml(n.desc)}</div>` : "") +
+    (rows ? `<h3>Relationships</h3>${rows}` : "") +
+    (srcs ? `<h3>Sources</h3>${srcs}` : "") +
+    (n.hop > 0 ? `<div class="m" style="margin-top:10px">click the node to re-centre on it</div>` : "");
+  detail.hidden = false;
+  document.body.classList.add("paneopen");
+}
+
+function hideDetail() {
+  detail.hidden = true;
+  document.body.classList.remove("paneopen");
+}
+
+document.getElementById("detailClose").onclick = hideDetail;
+
+function showEdgeTip(l, x, y) {
+  const f = familyOf(l.type);
+  tip.innerHTML =
+    `<div class="t">${escapeHtml(l.source.label)} — ${escapeHtml(l.target.label)}</div>` +
+    `<span class="chipline"><span class="dot" style="background:${css("--fam-" + f)}"></span>` +
+    `<strong>${escapeHtml(l.type)}</strong><span class="m"> · ${FAM_LABEL[f]}</span></span>` +
+    `<div class="m" style="margin-top:3px">${DIR_NOTE[l.direction] || l.direction}` +
+    (l.count > 1 ? ` · ${l.count} articles` : "") + `</div>` +
+    (l.description ? `<div class="quote">${escapeHtml(l.description)}</div>` : "");
+  positionTip(x, y);
+}
+
+// ---- chrome ---------------------------------------------------------------
+document.getElementById("back").onclick = () => {
+  const prev = history.pop();
+  if (prev) center(prev, {push: false});
+};
+document.getElementById("home").onclick = () => {
+  history = []; centerId = null; centerNode = null; nodes = []; links = [];
+  hideDetail();
+  document.getElementById("landing").hidden = false;
+  for (const el of ["top", "c", "legend", "themeBtn"])
+    document.getElementById(el).hidden = true;
+  document.getElementById("q0").focus();
+};
+document.getElementById("themeBtn").onclick = () => {
+  const cur = document.documentElement.getAttribute("data-theme");
+  document.documentElement.setAttribute("data-theme",
+    cur === "dark" ? "light" : cur === "light" ? "dark"
+      : (matchMedia("(prefers-color-scheme: dark)").matches ? "light" : "dark"));
+  draw();
+};
+window.addEventListener("keydown", e => {
+  if (e.key === "Escape" && centerId) document.getElementById("back").click();
+});
+
+wireSearch("q0", "results0", id => center(id));
+wireSearch("q", "results", id => center(id));
+
+// a few high-degree entities as starting points so the landing page isn't a
+// dead end for someone who doesn't know what's in here
+(async () => {
+  try {
+    const res = await fetch("/api/graph?min_degree=6&limit_nodes=14");
+    const {nodes: top} = await res.json();
+    document.getElementById("seeds").innerHTML = top.slice(0, 12).map(n =>
+      `<button class="seed" data-id="${escapeHtml(n.id)}">${escapeHtml(n.label)}</button>`).join("");
+    document.querySelectorAll(".seed").forEach(b => b.onclick = () => center(b.dataset.id));
+  } catch { /* seeds are a nicety, not required */ }
+})();
+</script>
+</body>
+</html>

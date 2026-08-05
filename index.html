@@ -27,7 +27,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Baumans&display=swap" rel="stylesheet">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { background: #0a0e1a; font-family: "Baumans", system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; overflow: hidden; color: #e0e0e0; }
+        body { background: #000; font-family: "Baumans", system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; overflow: hidden; color: #e0e0e0; }
 
         #canvas-container {
             width: 100vw;
@@ -135,6 +135,35 @@
         #search:focus { border-color: rgba(255,255,255,0.3); }
         #search::placeholder { color: rgba(255,255,255,0.3); }
 
+        #filters {
+            margin-top: 10px;
+            width: 260px;
+            padding: 10px 12px;
+            border: 1px solid rgba(255,255,255,0.12);
+            border-radius: 6px;
+            background: rgba(255,255,255,0.05);
+            font-size: 12px;
+            color: rgba(255,255,255,0.6);
+        }
+        #filters label {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 2px;
+            letter-spacing: 0.03em;
+        }
+        #filters label .val { color: rgba(255,255,255,0.85); }
+        #filters input[type=range] {
+            width: 100%;
+            margin: 0 0 10px;
+            accent-color: rgba(130,180,235,0.9);
+        }
+        #filters input[type=range]:last-child { margin-bottom: 2px; }
+        #filter-count {
+            margin-top: 4px;
+            font-size: 11px;
+            color: rgba(255,255,255,0.4);
+        }
+
         #zoom-controls {
             position: absolute;
             bottom: 20px;
@@ -183,6 +212,13 @@
     <div id="controls">
         <h1>Physical AI</h1>
         <input type="text" id="search" placeholder="Search entities...">
+        <div id="filters">
+            <label for="mention-slider">Min mentions <span class="val" id="mention-val">2</span></label>
+            <input type="range" id="mention-slider" min="1" max="20" value="2">
+            <label for="score-slider">Min relevance <span class="val" id="score-val">0.30</span></label>
+            <input type="range" id="score-slider" min="0" max="0.95" step="0.05" value="0.3">
+            <div id="filter-count"></div>
+        </div>
     </div>
 
     <div id="tooltip">
@@ -235,37 +271,10 @@
     };
 
     function getRadius(point, zoom) {
-        const base = Math.max(1.5, Math.min(5, Math.log2(point.mention_count + 1) * 1.4));
+        // Wider range than the old star look so mention count reads directly
+        // as dot size: 1 mention ≈ 1.6px, 600+ mentions ≈ 9px at rest zoom.
+        const base = Math.max(1.6, Math.min(9, Math.log2(point.mention_count + 1) * 1.6));
         return base * Math.min(zoom, 3);
-    }
-
-    // Draw diffraction spikes — the "+" lens flare from the telescope's secondary
-    function drawDiffractionSpikes(cx, cy, radius, alpha) {
-        const spikeLen = radius * 7;
-        const angle = Math.PI / 4; // 45 degrees
-        ctx.save();
-        ctx.globalAlpha = alpha;
-        // Draw twice: a wider softer pass, then a thin bright core
-        for (const pass of [{ w: 2.5, peak: 0.45 }, { w: 1, peak: 0.95 }]) {
-            ctx.lineWidth = pass.w;
-            for (let a = 0; a < 2; a++) {
-                const θ = angle + a * (Math.PI / 2);
-                const dx = Math.cos(θ) * spikeLen;
-                const dy = Math.sin(θ) * spikeLen;
-                const grad = ctx.createLinearGradient(cx - dx, cy - dy, cx + dx, cy + dy);
-                grad.addColorStop(0,    'rgba(255, 250, 230, 0)');
-                grad.addColorStop(0.3,  `rgba(255, 250, 230, ${pass.peak * 0.25})`);
-                grad.addColorStop(0.5,  `rgba(255, 255, 245, ${pass.peak})`);
-                grad.addColorStop(0.7,  `rgba(255, 250, 230, ${pass.peak * 0.25})`);
-                grad.addColorStop(1,    'rgba(255, 250, 230, 0)');
-                ctx.beginPath();
-                ctx.moveTo(cx - dx, cy - dy);
-                ctx.lineTo(cx + dx, cy + dy);
-                ctx.strokeStyle = grad;
-                ctx.stroke();
-            }
-        }
-        ctx.restore();
     }
 
     let data = null;
@@ -286,7 +295,8 @@
     let dragStartX, dragStartY;
     let searchTerm = '';
     let hoveredPoint = null;
-    let mentionThreshold = 1;
+    let mentionThreshold = 2;
+    let scoreThreshold = 0.3;
 
     let minX, maxX, minY, maxY, rangeX, rangeY;
 
@@ -294,78 +304,248 @@
     let simulation = null;
     let nodes = [];
 
-    // Star field
-    let stars = [];
+    // --- Tron background: procedural circuit-panel backdrop that pans and
+    // zooms with the data, with fractal level-of-detail. The board is an
+    // infinite surface tiled per detail octave: level L features are 4^L times
+    // smaller than level 0 and fade in as the camera approaches their native
+    // zoom, so zooming in turns thin traces into huge panels while a finer
+    // generation of circuitry materializes beneath them. Tiles are generated
+    // lazily from a per-cell seed — stable within a page load, fresh on reload.
+    const TRON_PLATE  = '#101319';   // base panel color
+    const TRON_GROOVE = '#07090d';   // carved gaps between panels
+    const TRON_NEON   = ['#35d5f5', '#2f7bff', '#4fe3c0'];  // trace palette
+    const TRON_S      = 4;           // scale factor between detail octaves
+    const TRON_MAX_LEVEL = 3;        // enough octaves to cover zoom 1.2..50
+    let tronSeed = 0;
+    const tronCells = new Map();     // "L:i,j" -> cell geometry
+    let vignette = null;
 
-    // Dither / film-grain overlay
-    let noiseCanvas = null;
-    const NOISE_TILE = 256;
-    function generateNoise() {
-        noiseCanvas = document.createElement('canvas');
-        noiseCanvas.width = NOISE_TILE;
-        noiseCanvas.height = NOISE_TILE;
-        const nctx = noiseCanvas.getContext('2d');
-        const img = nctx.createImageData(NOISE_TILE, NOISE_TILE);
-        for (let i = 0; i < img.data.length; i += 4) {
-            // Bluish-tinted luminance noise — centered around mid-gray so
-            // 'overlay' composite darkens and lightens symmetrically.
-            const v = 110 + Math.floor(Math.random() * 36);
-            img.data[i]     = v;
-            img.data[i + 1] = v + 2;
-            img.data[i + 2] = v + 6;
-            img.data[i + 3] = 255;
+    function mulberry32(a) {
+        return function() {
+            a |= 0; a = a + 0x6D2B79F5 | 0;
+            let t = Math.imul(a ^ a >>> 15, 1 | a);
+            t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+            return ((t ^ t >>> 14) >>> 0) / 4294967296;
+        };
+    }
+
+    function resetTronBackground() {
+        tronSeed = (Math.random() * 2 ** 31) | 0;
+        tronCells.clear();
+        vignette = ctx.createRadialGradient(width / 2, height / 2, Math.min(width, height) * 0.3,
+                                            width / 2, height / 2, Math.max(width, height) * 0.75);
+        vignette.addColorStop(0, 'rgba(0,0,0,0.25)');
+        vignette.addColorStop(1, 'rgba(0,0,0,0.6)');
+    }
+
+    // Cell size in rest coordinates: one cell fills the screen when the camera
+    // sits at the level's native zoom (k = TRON_S^L).
+    function tronCellSize(L) { return Math.max(width, height) / TRON_S ** L; }
+
+    function tronCell(L, ci, cj) {
+        const key = L + ':' + ci + ',' + cj;
+        let cell = tronCells.get(key);
+        if (cell) return cell;
+
+        const CS = tronCellSize(L);
+        const s = 1 / TRON_S ** L;          // feature scale for this octave
+        const rand = mulberry32(tronSeed ^ Math.imul(L + 1, 0x9E3779B9)
+                                         ^ Math.imul(ci, 0x85EBCA6B)
+                                         ^ Math.imul(cj, 0xC2B2AE35));
+        const GRID = 24 * s;
+        const cx0 = ci * CS, cy0 = cj * CS;
+        // Same on-screen density at every octave's native zoom
+        const areaRatio = CS * CS / (width * height) / (s * s);
+        const N_GROOVES = Math.round(14 * areaRatio);
+        const N_TRACES  = Math.round(9 * areaRatio);
+        const N_RINGS   = Math.round(4 * areaRatio);
+
+        const DIRS = [[1,0],[1,1],[0,1],[-1,1],[-1,0],[-1,-1],[0,-1],[1,-1]];
+        const snap = v => Math.round(v / GRID) * GRID;
+
+        function walk(steps) {
+            let x = snap(cx0 + rand() * CS);
+            let y = snap(cy0 + rand() * CS);
+            let di = Math.floor(rand() * 8);
+            const pts = [[x, y]];
+            for (let i = 0; i < steps; i++) {
+                const len = GRID * (2 + Math.floor(rand() * 7));
+                x += DIRS[di][0] * len;
+                y += DIRS[di][1] * len;
+                pts.push([x, y]);
+                di = (di + 8 + [1, -1, 2, -2][Math.floor(rand() * 4)]) % 8;
+            }
+            return pts;
         }
-        nctx.putImageData(img, 0, 0);
-    }
 
-    function drawNoiseOverlay() {
-        if (!noiseCanvas) return;
-        ctx.save();
-        ctx.globalCompositeOperation = 'overlay';
-        ctx.globalAlpha = 0.06;
-        // Jitter offset each frame for animated grain
-        const jx = Math.floor(Math.random() * NOISE_TILE);
-        const jy = Math.floor(Math.random() * NOISE_TILE);
-        const pattern = ctx.createPattern(noiseCanvas, 'repeat');
-        ctx.fillStyle = pattern;
-        ctx.translate(-jx, -jy);
-        ctx.fillRect(jx, jy, width, height);
-        ctx.restore();
-    }
+        function bbox(pts, pad) {
+            let ax = Infinity, ay = Infinity, bx = -Infinity, by = -Infinity;
+            for (const [x, y] of pts) {
+                ax = Math.min(ax, x); ay = Math.min(ay, y);
+                bx = Math.max(bx, x); by = Math.max(by, y);
+            }
+            return [ax - pad, ay - pad, bx + pad, by + pad];
+        }
 
-    function generateStars() {
-        stars = [];
-        const count = 400;
-        for (let i = 0; i < count; i++) {
-            stars.push({
-                x: Math.random(),
-                y: Math.random(),
-                size: Math.random() * 1.5 + 0.3,
-                brightness: Math.random() * 0.5 + 0.1,
-                twinkleSpeed: Math.random() * 0.002 + 0.001,
-                twinklePhase: Math.random() * Math.PI * 2,
+        const grooves = [], traces = [], rings = [];
+        for (let i = 0; i < N_GROOVES; i++) {
+            const pts = walk(4 + Math.floor(rand() * 5));
+            const w = (10 + rand() * 14) * s;
+            grooves.push({ pts, w, box: bbox(pts, w) });
+        }
+        for (let i = 0; i < N_TRACES; i++) {
+            const pts = walk(3 + Math.floor(rand() * 4));
+            traces.push({
+                pts,
+                color: TRON_NEON[Math.floor(rand() * TRON_NEON.length)],
+                alpha: 0.25 + rand() * 0.3,
+                streak: Math.floor(rand() * (pts.length - 1)),
+                streakAlpha: 0.5 + rand() * 0.3,
+                box: bbox(pts, 10 * s),
             });
         }
+        for (let i = 0; i < N_RINGS; i++) {
+            const x = snap(cx0 + rand() * CS), y = snap(cy0 + rand() * CS);
+            const r = (10 + rand() * 8) * s;
+            rings.push({
+                x, y, r,
+                color: TRON_NEON[Math.floor(rand() * TRON_NEON.length)],
+                box: [x - r * 2.5, y - r * 2.5, x + r * 2.5, y + r * 2.5],
+            });
+        }
+
+        cell = { s, grooves, traces, rings };
+        tronCells.set(key, cell);
+        // Bounded cache — evict oldest (Map preserves insertion order)
+        if (tronCells.size > 600) {
+            let n = 150;
+            for (const k of tronCells.keys()) { tronCells.delete(k); if (--n <= 0) break; }
+        }
+        return cell;
     }
 
-    function drawStars(time) {
-        for (const star of stars) {
-            const twinkle = Math.sin(time * star.twinkleSpeed + star.twinklePhase) * 0.3 + 0.7;
-            const alpha = star.brightness * twinkle;
+    function drawTronBackground() {
+        ctx.fillStyle = TRON_PLATE;
+        ctx.fillRect(0, 0, width, height);
+
+        // Same affine motion as the data layer: a rest-coordinate point r maps
+        // to cx + offsetX + (r - cx) * (zoom / MIN_ZOOM).
+        const k = zoom / MIN_ZOOM;
+        const cx = width / 2, cy = height / 2;
+        // Zoom position in octaves: 0 at rest, 1 at k=TRON_S, ...
+        const t = Math.max(0, Math.log(k) / Math.log(TRON_S));
+
+        // Visible rest-coordinate rect, with margin
+        const rx0 = cx + (0 - cx - offsetX) / k,     rx1 = cx + (width - cx - offsetX) / k;
+        const ry0 = cy + (0 - cy - offsetY) / k,     ry1 = cy + (height - cy - offsetY) / k;
+        const mgx = (rx1 - rx0) * 0.15, mgy = (ry1 - ry0) * 0.15;
+
+        const visible = box =>
+            cx + offsetX + (box[0] - cx) * k < width &&
+            cx + offsetX + (box[2] - cx) * k > 0 &&
+            cy + offsetY + (box[1] - cy) * k < height &&
+            cy + offsetY + (box[3] - cy) * k > 0;
+
+        function tracePath(pts) {
             ctx.beginPath();
-            ctx.arc(star.x * width, star.y * height, star.size, 0, Math.PI * 2);
-            ctx.fillStyle = `rgba(200, 210, 240, ${alpha})`;
-            ctx.fill();
+            ctx.moveTo(pts[0][0], pts[0][1]);
+            for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
         }
+
+        ctx.save();
+        ctx.translate(cx + offsetX, cy + offsetY);
+        ctx.scale(k, k);
+        ctx.translate(-cx, -cy);
+
+        for (let L = 0; L <= TRON_MAX_LEVEL; L++) {
+            // Octave fade window: full within half an octave of native zoom,
+            // gone a full octave away. Level 0 never fades from zooming out.
+            const dt = L === 0 ? Math.max(0, t) : Math.abs(t - L);
+            const levelAlpha = Math.max(0, Math.min(1, (1.0 - dt) * 2));
+            if (levelAlpha < 0.02) continue;
+
+            const CS = tronCellSize(L);
+            const i0 = Math.floor((rx0 - mgx) / CS), i1 = Math.floor((rx1 + mgx) / CS);
+            const j0 = Math.floor((ry0 - mgy) / CS), j1 = Math.floor((ry1 + mgy) / CS);
+            if ((i1 - i0 + 1) * (j1 - j0 + 1) > 80) continue;  // way below native zoom
+
+            for (let ci = i0; ci <= i1; ci++) {
+                for (let cj = j0; cj <= j1; cj++) {
+                    const cell = tronCell(L, ci, cj);
+                    const s = cell.s;
+
+                    // Grooves: dark channels carving the surface into panels,
+                    // with a light offset stroke faking a beveled edge.
+                    ctx.lineJoin = 'round';
+                    ctx.lineCap = 'round';
+                    for (const gr of cell.grooves) {
+                        if (!visible(gr.box)) continue;
+                        tracePath(gr.pts);
+                        ctx.strokeStyle = TRON_GROOVE;
+                        ctx.globalAlpha = levelAlpha;
+                        ctx.lineWidth = gr.w;
+                        ctx.stroke();
+                        tracePath(gr.pts.map(([x, y]) => [x + 1.5 * s, y + 1.5 * s]));
+                        ctx.strokeStyle = 'rgba(255,255,255,0.045)';
+                        ctx.lineWidth = 1.5 * s;
+                        ctx.stroke();
+                    }
+
+                    // Neon traces — glow from layered strokes (no shadowBlur)
+                    ctx.lineJoin = 'miter';
+                    for (const tr of cell.traces) {
+                        if (!visible(tr.box)) continue;
+                        tracePath(tr.pts);
+                        ctx.strokeStyle = tr.color;
+                        ctx.globalAlpha = tr.alpha * 0.25 * levelAlpha;
+                        ctx.lineWidth = 6 * s;
+                        ctx.stroke();
+                        ctx.globalAlpha = tr.alpha * levelAlpha;
+                        ctx.lineWidth = 1.6 * s;
+                        ctx.stroke();
+                        // Brighter "energized" streak along one segment
+                        tracePath([tr.pts[tr.streak], tr.pts[tr.streak + 1]]);
+                        ctx.globalAlpha = tr.streakAlpha * 0.3 * levelAlpha;
+                        ctx.lineWidth = 8 * s;
+                        ctx.stroke();
+                        ctx.globalAlpha = tr.streakAlpha * levelAlpha;
+                        ctx.lineWidth = 2.2 * s;
+                        ctx.stroke();
+                    }
+
+                    // Port rings: dark pad with a glowing annulus
+                    for (const p of cell.rings) {
+                        if (!visible(p.box)) continue;
+                        ctx.beginPath(); ctx.arc(p.x, p.y, p.r * 2, 0, Math.PI * 2);
+                        ctx.fillStyle = TRON_GROOVE;
+                        ctx.globalAlpha = levelAlpha;
+                        ctx.fill();
+                        ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+                        ctx.strokeStyle = p.color;
+                        ctx.globalAlpha = 0.18 * levelAlpha;
+                        ctx.lineWidth = 5.5 * s;
+                        ctx.stroke();
+                        ctx.globalAlpha = 0.55 * levelAlpha;
+                        ctx.lineWidth = 2 * s;
+                        ctx.stroke();
+                    }
+                }
+            }
+        }
+        ctx.globalAlpha = 1;
+        ctx.restore();
+
+        // Vignette stays screen-fixed — it's lighting, not part of the board
+        ctx.fillStyle = vignette;
+        ctx.fillRect(0, 0, width, height);
     }
 
     function init() {
         canvas = document.getElementById('canvas');
         ctx = canvas.getContext('2d');
-        generateStars();
-        generateNoise();
         resize();
-        window.addEventListener('resize', () => { resize(); generateStars(); });
+        resetTronBackground();
+        window.addEventListener('resize', () => { resize(); resetTronBackground(); });
 
         canvas.addEventListener('mousedown', onMouseDown);
         canvas.addEventListener('mousemove', onMouseMove);
@@ -381,6 +561,17 @@
         document.getElementById('zoom-out').addEventListener('click', () => { targetZoom = Math.max(MIN_ZOOM, targetZoom / 1.3); });
         document.getElementById('zoom-reset').addEventListener('click', () => { targetZoom = MIN_ZOOM; targetOffsetX = 0; targetOffsetY = 0; });
         document.getElementById('search').addEventListener('input', (e) => { searchTerm = e.target.value.toLowerCase(); });
+        document.getElementById('mention-slider').addEventListener('input', (e) => {
+            mentionThreshold = +e.target.value;
+            document.getElementById('mention-val').textContent = e.target.value;
+            updateFilterCount();
+        });
+        document.getElementById('score-slider').addEventListener('input', (e) => {
+            scoreThreshold = +e.target.value;
+            document.getElementById('score-val').textContent =
+                scoreThreshold > 0 ? scoreThreshold.toFixed(2) : 'off';
+            updateFilterCount();
+        });
 
         loadData();
     }
@@ -390,7 +581,7 @@
         data = await resp.json();
 
         // Version + last-updated note — bump APP_VERSION on notable UX/pipeline changes.
-        const APP_VERSION = 'v1.14';
+        const APP_VERSION = 'v1.16';
         if (data.generated_at) {
             const d = new Date(data.generated_at);
             const mm = String(d.getMonth() + 1).padStart(2, '0');
@@ -419,12 +610,10 @@
             targetY: p.y,
             x: p.x + (Math.random() - 0.5) * 0.1,
             y: p.y + (Math.random() - 0.5) * 0.1,
-            twinkleSpeed: 0.0008 + Math.random() * 0.0022,
-            twinklePhase: Math.random() * Math.PI * 2,
-            twinkleDepth: 0.12 + Math.random() * 0.22, // amplitude of brightness modulation
         }));
 
         data.points = nodes;
+        updateFilterCount();
         initSimulation();
         startRenderLoop();
     }
@@ -461,7 +650,19 @@
 
     function isPointVisible(point) {
         if (point.mention_count < mentionThreshold) return false;
+        // Points without a score (shouldn't happen post-scoring, but old
+        // data.json builds lack the field) are exempt rather than hidden.
+        if (scoreThreshold > 0 && point.score != null && point.score < scoreThreshold) return false;
         return true;
+    }
+
+    function updateFilterCount() {
+        if (!data) return;
+        const shown = data.points.filter(isPointVisible).length;
+        document.getElementById('filter-count').textContent =
+            shown === data.points.length
+                ? `${data.points.length} entities`
+                : `${shown} of ${data.points.length} entities`;
     }
 
     function resize() {
@@ -501,21 +702,14 @@
         offsetX += (targetOffsetX - offsetX) * ease;
         offsetY += (targetOffsetY - offsetY) * ease;
 
-        // Dark space background
-        ctx.fillStyle = '#0a0e1a';
-        ctx.fillRect(0, 0, width, height);
-
-        // Subtle radial gradient for depth
-        const grad = ctx.createRadialGradient(width / 2, height / 2, 0, width / 2, height / 2, Math.max(width, height) * 0.7);
-        grad.addColorStop(0, 'rgba(15, 25, 50, 0.3)');
-        grad.addColorStop(1, 'rgba(5, 8, 15, 0)');
-        ctx.fillStyle = grad;
-        ctx.fillRect(0, 0, width, height);
+        drawTronBackground();
 
         if (!data) return;
 
-        // Zoom thresholds for label transitions
-        const clusterLabelFadeIn = 1.5;   // cluster names start appearing
+        // Zoom thresholds for label transitions. Cluster labels are visible
+        // from the initial zoom (MIN_ZOOM 1.2 > 1.0) — the map reads as
+        // labeled territories at rest, not on zoom-in.
+        const clusterLabelFadeIn = 1.0;   // cluster names start appearing
         const companyLabelStart = 6.0;    // company names start appearing
         // After companyLabelStart, cluster labels transition to background layer
 
@@ -592,16 +786,24 @@
             return labels;
         }
 
-        // --- Draw multi-line centered text ---
-        function drawClusterLabel(lbl, color) {
+        // --- Draw multi-line centered text, optionally with a dark outline
+        // halo so the label reads over white dots and dark board alike ---
+        function drawClusterLabel(lbl, color, haloColor, haloWidth) {
             const startY = lbl.y - (lbl.lines.length - 1) * lbl.lineHeight / 2;
             for (let i = 0; i < lbl.lines.length; i++) {
+                const ly = startY + i * lbl.lineHeight;
+                if (haloColor) {
+                    ctx.strokeStyle = haloColor;
+                    ctx.lineWidth = haloWidth;
+                    ctx.lineJoin = 'round';
+                    ctx.strokeText(lbl.lines[i], lbl.x, ly);
+                }
                 ctx.fillStyle = color;
-                ctx.fillText(lbl.lines[i], lbl.x, startY + i * lbl.lineHeight);
+                ctx.fillText(lbl.lines[i], lbl.x, ly);
             }
         }
 
-        // --- Cluster labels: background layer (drawn behind stars when zoomed in) ---
+        // --- Cluster labels: background layer (large, dim — deep-zoom wayfinding) ---
         const bgPhase = zoom > companyLabelStart ? Math.min(1, (zoom - companyLabelStart) / 3.0) : 0;
         if (zoom > clusterLabelFadeIn && bgPhase > 0) {
             ctx.textAlign = 'center';
@@ -612,50 +814,7 @@
             ctx.font = `800 ${fontSize}px "Baumans", -apple-system, BlinkMacSystemFont, sans-serif`;
 
             for (const lbl of labels) {
-                drawClusterLabel(lbl, `rgba(60, 120, 180, ${bgAlpha})`);
-            }
-        }
-
-        // Background star field (drawn after bg cluster labels so stars are on top)
-        drawStars(time);
-
-        // --- Cluster boundaries: soft light-blue convex hulls ---
-        for (const cluster of data.clusters) {
-            const boundary = cluster.boundary;
-            if (!boundary || boundary.length < 3) continue;
-            ctx.beginPath();
-            for (let i = 0; i < boundary.length; i++) {
-                const [bx, by] = toScreen(boundary[i][0], boundary[i][1]);
-                if (i === 0) ctx.moveTo(bx, by);
-                else ctx.lineTo(bx, by);
-            }
-            ctx.closePath();
-            ctx.strokeStyle = 'rgba(130, 180, 235, 0.22)';
-            ctx.lineWidth = 1;
-            ctx.stroke();
-        }
-
-        // --- Cluster labels: foreground layer (before they sink to background) ---
-        if (zoom > clusterLabelFadeIn) {
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            const fadeIn = Math.min(1, (zoom - clusterLabelFadeIn) / 1.0);
-            const fgAlpha = Math.max(0, fadeIn * (1 - bgPhase) * 0.6);
-
-            if (fgAlpha > 0.01) {
-                const fontSize = Math.max(13, Math.min(28, 18 * Math.sqrt(zoom / 2)));
-                const labels = computeClusterLabelPositions(fontSize);
-                ctx.font = `700 ${fontSize}px "Baumans", -apple-system, BlinkMacSystemFont, sans-serif`;
-
-                for (const lbl of labels) {
-                    // Shadow
-                    const saved = lbl.x; const savedY = lbl.y;
-                    lbl.x += 1; lbl.y += 1;
-                    drawClusterLabel(lbl, `rgba(0, 0, 0, ${fgAlpha * 0.6})`);
-                    lbl.x = saved; lbl.y = savedY;
-                    // Light blue text
-                    drawClusterLabel(lbl, `rgba(120, 180, 240, ${fgAlpha})`);
-                }
+                drawClusterLabel(lbl, `rgba(200, 150, 60, ${bgAlpha})`);
             }
         }
 
@@ -677,49 +836,10 @@
             if (isSearchMatch) radius *= 1.5;
             if (isHovered) radius *= 1.4;
 
-            // Gentle twinkle — per-node phase so the field shimmers asynchronously.
-            // Bias toward brighter so the mean stays close to 1.
-            const tw = Math.sin(time * point.twinkleSpeed + point.twinklePhase);
-            const twinkle = 1 + tw * point.twinkleDepth * 0.5 - point.twinkleDepth * 0.15;
-            alpha *= twinkle;
-            // Small radius pulse couples with brightness for a more organic shimmer
-            radius *= 1 + tw * 0.05;
-
-            // Uniform warm-white star color — not tied to any data dimension
-            // so it doesn't imply meaning the data doesn't carry.
-            const r = 255, g = 238, b = 200;
-
-            // Diffraction spikes for brighter stars — + shape from the "lens"
-            if (alpha > 0.5 && point.mention_count >= 3) {
-                const spikeAlpha = Math.min(0.8, (point.mention_count - 2) / 12);
-                drawDiffractionSpikes(sx, sy, radius, spikeAlpha * alpha);
-            }
-
-            // Outer glow — larger, stronger, two-layer for a more apparent halo
-            if (alpha > 0.3 && radius > 1.5) {
-                const glowRadius = radius * 5;
-                const glowGrad = ctx.createRadialGradient(sx, sy, radius * 0.2, sx, sy, glowRadius);
-                glowGrad.addColorStop(0,    `rgba(${r}, ${g}, ${b}, ${0.55 * alpha})`);
-                glowGrad.addColorStop(0.25, `rgba(${r}, ${g}, ${b}, ${0.22 * alpha})`);
-                glowGrad.addColorStop(0.6,  `rgba(${r}, ${g}, ${b}, ${0.06 * alpha})`);
-                glowGrad.addColorStop(1,    'rgba(0,0,0,0)');
-                ctx.beginPath();
-                ctx.arc(sx, sy, glowRadius, 0, Math.PI * 2);
-                ctx.fillStyle = glowGrad;
-                ctx.fill();
-            }
-
-            // Core — bright white center fading all the way to black at the edge.
-            // Drawing the black rim explicitly gives the dot a harder, more
-            // photographic falloff against whatever is behind it.
+            // Plain white dot, hard edge — size alone carries mention count.
             ctx.beginPath();
             ctx.arc(sx, sy, radius, 0, Math.PI * 2);
-            const coreGrad = ctx.createRadialGradient(sx, sy, 0, sx, sy, radius);
-            coreGrad.addColorStop(0,    `rgba(255, 255, 255, ${alpha})`);
-            coreGrad.addColorStop(0.35, `rgba(${r}, ${g}, ${b}, ${alpha * 0.95})`);
-            coreGrad.addColorStop(0.75, `rgba(${r}, ${g}, ${b}, ${alpha * 0.35})`);
-            coreGrad.addColorStop(1,    `rgba(${r}, ${g}, ${b}, 0)`);
-            ctx.fillStyle = coreGrad;
+            ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
             ctx.fill();
 
             if (isHovered || isSearchMatch) {
@@ -747,9 +867,48 @@
             }
         }
 
-        // Dither / film-grain overlay — softens gradient banding and gives a
-        // subtle photographic texture. Applied last so it affects everything.
-        drawNoiseOverlay();
+        // --- Cluster boundaries: marching-ants dashed hulls (over the dots).
+        // Constant screen-space dash + steady drift keeps them visually
+        // separate from the static circuit art behind them.
+        ctx.setLineDash([7, 5]);
+        ctx.lineDashOffset = -(time * 0.02) % 12;
+        for (const cluster of data.clusters) {
+            const boundary = cluster.boundary;
+            if (!boundary || boundary.length < 3) continue;
+            ctx.beginPath();
+            for (let i = 0; i < boundary.length; i++) {
+                const [bx, by] = toScreen(boundary[i][0], boundary[i][1]);
+                if (i === 0) ctx.moveTo(bx, by);
+                else ctx.lineTo(bx, by);
+            }
+            ctx.closePath();
+            ctx.strokeStyle = 'rgba(150, 205, 255, 0.55)';
+            ctx.lineWidth = 1.2;
+            ctx.stroke();
+        }
+        ctx.setLineDash([]);
+
+        // --- Cluster labels: foreground layer, on top of the dots ---
+        if (zoom > clusterLabelFadeIn) {
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            const fadeIn = Math.min(1, (zoom - clusterLabelFadeIn) / 0.2);
+            const fgAlpha = Math.max(0, fadeIn * (1 - bgPhase) * 0.85);
+
+            if (fgAlpha > 0.01) {
+                const fontSize = Math.max(13, Math.min(28, 18 * Math.sqrt(zoom / 2)));
+                const labels = computeClusterLabelPositions(fontSize);
+                ctx.font = `700 ${fontSize}px "Baumans", -apple-system, BlinkMacSystemFont, sans-serif`;
+
+                const haloW = Math.max(2.5, fontSize * 0.18);
+                for (const lbl of labels) {
+                    // Amber fill + dark outline halo: bright against the board,
+                    // dark-rimmed against the white dots.
+                    drawClusterLabel(lbl, `rgba(255, 191, 77, ${fgAlpha})`,
+                                     `rgba(10, 8, 4, ${fgAlpha * 0.9})`, haloW);
+                }
+            }
+        }
     }
 
     function findPointAt(mx, my) {
@@ -775,6 +934,7 @@
         if (point.type) meta += ` \u00b7 ${point.type}`;
         if (point.location) meta += ` \u00b7 ${point.location}`;
         meta += ` \u00b7 ${point.mention_count} mention${point.mention_count !== 1 ? 's' : ''}`;
+        if (point.score != null) meta += ` \u00b7 relevance ${point.score.toFixed(2)}`;
         tooltip.querySelector('.meta').textContent = meta;
         const tags = point.tags || [];
         tooltip.querySelector('.tags').textContent = tags.length ? tags.join(', ') : '';
