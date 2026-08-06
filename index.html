@@ -451,10 +451,15 @@
         ctx.fillRect(0, 0, width, height);
         const tsec = time * 0.001;
         // Current float offset: elliptical orbit (sin/cos quadrature) so the
-        // element glides continuously rather than shuttling back and forth
-        const dOff = el => {
+        // element glides continuously rather than shuttling back and forth.
+        // Zoom-compensated (dOffFor is bound per-level below) so orbits stay
+        // the same size in SCREEN pixels at any zoom — elements keep floating
+        // visibly even deep into the board.
+        let dOff = null;
+        const makeDOff = (kk, es) => el => {
             const a = tsec * el.om + el.ph;
-            return [el.ax * Math.sin(a), el.ay * Math.cos(a)];
+            const f = Math.min(1 / (kk * es), 3);
+            return [el.ax * Math.sin(a) * f, el.ay * Math.cos(a) * f];
         };
 
         // Same affine motion as the data layer: a rest-coordinate point r maps
@@ -469,11 +474,11 @@
         const ry0 = cy + (0 - cy - offsetY) / k,     ry1 = cy + (height - cy - offsetY) / k;
         const mgx = (rx1 - rx0) * 0.15, mgy = (ry1 - ry0) * 0.15;
 
-        const visible = box =>
-            cx + offsetX + (box[0] - cx) * k < width &&
-            cx + offsetX + (box[2] - cx) * k > 0 &&
-            cy + offsetY + (box[1] - cy) * k < height &&
-            cy + offsetY + (box[3] - cy) * k > 0;
+        const visible = (box, pad = 0) =>
+            cx + offsetX + (box[0] - pad - cx) * k < width &&
+            cx + offsetX + (box[2] + pad - cx) * k > 0 &&
+            cy + offsetY + (box[1] - pad - cy) * k < height &&
+            cy + offsetY + (box[3] + pad - cy) * k > 0;
 
         function tracePath(pts, ox, oy) {
             ctx.beginPath();
@@ -502,13 +507,14 @@
                 for (let cj = j0; cj <= j1; cj++) {
                     const cell = tronCell(L, ci, cj);
                     const s = cell.s;
+                    dOff = makeDOff(k, s);
 
                     // Grooves: dark channels carving the surface into panels,
                     // with a light offset stroke faking a beveled edge.
                     ctx.lineJoin = 'round';
                     ctx.lineCap = 'round';
                     for (const gr of cell.grooves) {
-                        if (!visible(gr.box)) continue;
+                        if (!visible(gr.box, gr.amp * 2)) continue;
                         const [ox, oy] = dOff(gr);
                         tracePath(gr.pts, ox, oy);
                         ctx.strokeStyle = TRON_GROOVE;
@@ -524,7 +530,7 @@
                     // Neon traces — glow from layered strokes (no shadowBlur)
                     ctx.lineJoin = 'miter';
                     for (const tr of cell.traces) {
-                        if (!visible(tr.box)) continue;
+                        if (!visible(tr.box, tr.amp * 2)) continue;
                         const [ox, oy] = dOff(tr);
                         tracePath(tr.pts, ox, oy);
                         ctx.strokeStyle = tr.color;
@@ -546,7 +552,7 @@
 
                     // Port rings: dark pad with a glowing annulus
                     for (const p of cell.rings) {
-                        if (!visible(p.box)) continue;
+                        if (!visible(p.box, p.amp * 2)) continue;
                         const [ox, oy] = dOff(p);
                         ctx.beginPath(); ctx.arc(p.x + ox, p.y + oy, p.r * 2, 0, Math.PI * 2);
                         ctx.fillStyle = TRON_GROOVE;
