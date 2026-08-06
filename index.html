@@ -905,7 +905,9 @@
             const fgAlpha = Math.max(0, fadeIn * (1 - bgPhase) * 0.85);
 
             if (fgAlpha > 0.01) {
-                const fontSize = Math.max(13, Math.min(28, 18 * Math.sqrt(zoom / 2)));
+                // Small at rest (many labels visible), growing as zoom brings
+                // fewer clusters on screen.
+                const fontSize = Math.max(9, Math.min(28, 13 * Math.sqrt(zoom / 2)));
                 const labels = computeClusterLabelPositions(fontSize);
                 ctx.font = `700 ${fontSize}px "Baumans", -apple-system, BlinkMacSystemFont, sans-serif`;
 
