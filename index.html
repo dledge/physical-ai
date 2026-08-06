@@ -163,6 +163,11 @@
             font-size: 11px;
             color: rgba(255,255,255,0.4);
         }
+        #corpus-note {
+            margin-top: 2px;
+            font-size: 11px;
+            color: rgba(255,255,255,0.4);
+        }
 
         #zoom-controls {
             position: absolute;
@@ -218,6 +223,7 @@
             <label for="score-slider">Min relevance <span class="val" id="score-val">0.30</span></label>
             <input type="range" id="score-slider" min="0" max="0.95" step="0.05" value="0.3">
             <div id="filter-count"></div>
+            <div id="corpus-note"></div>
         </div>
     </div>
 
@@ -629,6 +635,11 @@
         } else {
             document.getElementById('last-updated').textContent =
                 `${APP_VERSION} · created by Dan Ledger`;
+        }
+
+        if (data.total_articles) {
+            document.getElementById('corpus-note').textContent =
+                `distilled from ${data.total_articles.toLocaleString()} news articles`;
         }
 
         minX = Infinity; maxX = -Infinity;
