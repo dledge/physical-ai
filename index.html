@@ -387,30 +387,45 @@
             return [ax - pad, ay - pad, bx + pad, by + pad];
         }
 
+        // Per-element drift: slow oscillation along a random direction, so
+        // each shape wanders gently its own way without ever leaving its cell.
+        function drift() {
+            const amp = (6 + rand() * 14) * s;
+            const ang = rand() * Math.PI * 2;
+            return { ax: Math.cos(ang) * amp, ay: Math.sin(ang) * amp,
+                     om: 0.03 + rand() * 0.09, ph: rand() * Math.PI * 2, amp };
+        }
+
         const grooves = [], traces = [], rings = [];
         for (let i = 0; i < N_GROOVES; i++) {
             const pts = walk(4 + Math.floor(rand() * 5));
             const w = (10 + rand() * 14) * s;
-            grooves.push({ pts, w, box: bbox(pts, w) });
+            const d = drift();
+            grooves.push({ pts, w, ...d, box: bbox(pts, w + d.amp) });
         }
         for (let i = 0; i < N_TRACES; i++) {
             const pts = walk(3 + Math.floor(rand() * 4));
+            const d = drift();
             traces.push({
                 pts,
                 color: TRON_NEON[Math.floor(rand() * TRON_NEON.length)],
                 alpha: 0.25 + rand() * 0.3,
                 streak: Math.floor(rand() * (pts.length - 1)),
                 streakAlpha: 0.5 + rand() * 0.3,
-                box: bbox(pts, 10 * s),
+                ...d,
+                box: bbox(pts, 10 * s + d.amp),
             });
         }
         for (let i = 0; i < N_RINGS; i++) {
             const x = snap(cx0 + rand() * CS), y = snap(cy0 + rand() * CS);
             const r = (10 + rand() * 8) * s;
+            const d = drift();
             rings.push({
                 x, y, r,
                 color: TRON_NEON[Math.floor(rand() * TRON_NEON.length)],
-                box: [x - r * 2.5, y - r * 2.5, x + r * 2.5, y + r * 2.5],
+                ...d,
+                box: [x - r * 2.5 - d.amp, y - r * 2.5 - d.amp,
+                      x + r * 2.5 + d.amp, y + r * 2.5 + d.amp],
             });
         }
 
@@ -424,9 +439,15 @@
         return cell;
     }
 
-    function drawTronBackground() {
+    function drawTronBackground(time) {
         ctx.fillStyle = TRON_PLATE;
         ctx.fillRect(0, 0, width, height);
+        const tsec = time * 0.001;
+        // Current drift offset for an element: sinusoid along its direction
+        const dOff = el => {
+            const w = Math.sin(tsec * el.om + el.ph);
+            return [el.ax * w, el.ay * w];
+        };
 
         // Same affine motion as the data layer: a rest-coordinate point r maps
         // to cx + offsetX + (r - cx) * (zoom / MIN_ZOOM).
@@ -446,10 +467,10 @@
             cy + offsetY + (box[1] - cy) * k < height &&
             cy + offsetY + (box[3] - cy) * k > 0;
 
-        function tracePath(pts) {
+        function tracePath(pts, ox, oy) {
             ctx.beginPath();
-            ctx.moveTo(pts[0][0], pts[0][1]);
-            for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+            ctx.moveTo(pts[0][0] + ox, pts[0][1] + oy);
+            for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0] + ox, pts[i][1] + oy);
         }
 
         ctx.save();
@@ -480,12 +501,13 @@
                     ctx.lineCap = 'round';
                     for (const gr of cell.grooves) {
                         if (!visible(gr.box)) continue;
-                        tracePath(gr.pts);
+                        const [ox, oy] = dOff(gr);
+                        tracePath(gr.pts, ox, oy);
                         ctx.strokeStyle = TRON_GROOVE;
                         ctx.globalAlpha = levelAlpha;
                         ctx.lineWidth = gr.w;
                         ctx.stroke();
-                        tracePath(gr.pts.map(([x, y]) => [x + 1.5 * s, y + 1.5 * s]));
+                        tracePath(gr.pts, ox + 1.5 * s, oy + 1.5 * s);
                         ctx.strokeStyle = 'rgba(255,255,255,0.045)';
                         ctx.lineWidth = 1.5 * s;
                         ctx.stroke();
@@ -495,7 +517,8 @@
                     ctx.lineJoin = 'miter';
                     for (const tr of cell.traces) {
                         if (!visible(tr.box)) continue;
-                        tracePath(tr.pts);
+                        const [ox, oy] = dOff(tr);
+                        tracePath(tr.pts, ox, oy);
                         ctx.strokeStyle = tr.color;
                         ctx.globalAlpha = tr.alpha * 0.25 * levelAlpha;
                         ctx.lineWidth = 6 * s;
@@ -504,7 +527,7 @@
                         ctx.lineWidth = 1.6 * s;
                         ctx.stroke();
                         // Brighter "energized" streak along one segment
-                        tracePath([tr.pts[tr.streak], tr.pts[tr.streak + 1]]);
+                        tracePath([tr.pts[tr.streak], tr.pts[tr.streak + 1]], ox, oy);
                         ctx.globalAlpha = tr.streakAlpha * 0.3 * levelAlpha;
                         ctx.lineWidth = 8 * s;
                         ctx.stroke();
@@ -516,11 +539,12 @@
                     // Port rings: dark pad with a glowing annulus
                     for (const p of cell.rings) {
                         if (!visible(p.box)) continue;
-                        ctx.beginPath(); ctx.arc(p.x, p.y, p.r * 2, 0, Math.PI * 2);
+                        const [ox, oy] = dOff(p);
+                        ctx.beginPath(); ctx.arc(p.x + ox, p.y + oy, p.r * 2, 0, Math.PI * 2);
                         ctx.fillStyle = TRON_GROOVE;
                         ctx.globalAlpha = levelAlpha;
                         ctx.fill();
-                        ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+                        ctx.beginPath(); ctx.arc(p.x + ox, p.y + oy, p.r, 0, Math.PI * 2);
                         ctx.strokeStyle = p.color;
                         ctx.globalAlpha = 0.18 * levelAlpha;
                         ctx.lineWidth = 5.5 * s;
@@ -702,7 +726,7 @@
         offsetX += (targetOffsetX - offsetX) * ease;
         offsetY += (targetOffsetY - offsetY) * ease;
 
-        drawTronBackground();
+        drawTronBackground(time);
 
         if (!data) return;
 
