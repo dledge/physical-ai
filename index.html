@@ -625,9 +625,10 @@
             const mm = String(d.getMonth() + 1).padStart(2, '0');
             const yyyy = d.getFullYear();
             document.getElementById('last-updated').textContent =
-                `${APP_VERSION}, data last updated ${mm}-${yyyy}`;
+                `${APP_VERSION}, data last updated ${mm}-${yyyy} · created by Dan Ledger`;
         } else {
-            document.getElementById('last-updated').textContent = APP_VERSION;
+            document.getElementById('last-updated').textContent =
+                `${APP_VERSION} · created by Dan Ledger`;
         }
 
         minX = Infinity; maxX = -Infinity;
