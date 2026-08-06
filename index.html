@@ -858,7 +858,10 @@
             }
 
             // Company name labels — appear as we zoom past cluster labels
-            const companyAlpha = zoom > companyLabelStart ? Math.min(0.85, (zoom - companyLabelStart) * 0.5) : 0;
+            // Slow ramp: company names drift in over ~4-5 zoom units while the
+            // cluster names are fading to the background layer, so the two
+            // label generations crossfade instead of clashing.
+            const companyAlpha = zoom > companyLabelStart ? Math.min(0.85, (zoom - companyLabelStart) * 0.18) : 0;
 
             const shouldLabel = (companyAlpha > 0 && point.mention_count >= 2) ||
                                 (zoom > 5 && point.mention_count >= 1) ||
