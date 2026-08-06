@@ -387,13 +387,20 @@
             return [ax - pad, ay - pad, bx + pad, by + pad];
         }
 
-        // Per-element drift: slow oscillation along a random direction, so
-        // each shape wanders gently its own way without ever leaving its cell.
+        // Per-element float: each shape glides around a slow ellipse of its
+        // own size, eccentricity, and rotation sense — continuous motion in
+        // differing directions, but bounded so nothing leaves its cell.
         function drift() {
-            const amp = (6 + rand() * 14) * s;
-            const ang = rand() * Math.PI * 2;
-            return { ax: Math.cos(ang) * amp, ay: Math.sin(ang) * amp,
-                     om: 0.03 + rand() * 0.09, ph: rand() * Math.PI * 2, amp };
+            // ~40% are pronounced floaters; the rest barely breathe, so the
+            // motion reads clearly against a mostly-anchored board.
+            const floater = rand() < 0.4;
+            const amp = (floater ? 16 + rand() * 26 : 2 + rand() * 4) * s;
+            const ax = amp * (0.4 + rand() * 0.6) * (rand() < 0.5 ? -1 : 1);
+            const ay = amp * (0.4 + rand() * 0.6) * (rand() < 0.5 ? -1 : 1);
+            return { ax, ay,
+                     om: floater ? 0.06 + rand() * 0.1 : 0.03 + rand() * 0.05,
+                     ph: rand() * Math.PI * 2,
+                     amp: Math.max(Math.abs(ax), Math.abs(ay)) };
         }
 
         const grooves = [], traces = [], rings = [];
@@ -443,10 +450,11 @@
         ctx.fillStyle = TRON_PLATE;
         ctx.fillRect(0, 0, width, height);
         const tsec = time * 0.001;
-        // Current drift offset for an element: sinusoid along its direction
+        // Current float offset: elliptical orbit (sin/cos quadrature) so the
+        // element glides continuously rather than shuttling back and forth
         const dOff = el => {
-            const w = Math.sin(tsec * el.om + el.ph);
-            return [el.ax * w, el.ay * w];
+            const a = tsec * el.om + el.ph;
+            return [el.ax * Math.sin(a), el.ay * Math.cos(a)];
         };
 
         // Same affine motion as the data layer: a rest-coordinate point r maps
