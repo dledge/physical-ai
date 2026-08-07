@@ -625,7 +625,7 @@
         data = await resp.json();
 
         // Version + last-updated note — bump APP_VERSION on notable UX/pipeline changes.
-        const APP_VERSION = 'v1.16';
+        const APP_VERSION = 'v1.17';
         if (data.generated_at) {
             const d = new Date(data.generated_at);
             const mm = String(d.getMonth() + 1).padStart(2, '0');
@@ -840,17 +840,24 @@
             return labels;
         }
 
-        // --- Draw multi-line centered text, optionally with a dark outline
-        // halo so the label reads over white dots and dark board alike ---
-        function drawClusterLabel(lbl, color, haloColor, haloWidth) {
+        // --- Draw multi-line centered text over a soft dark aura.
+        // A single outline stroke gets swamped where dots pile up, so the halo
+        // is three widening passes at falling alpha: the glyphs carry their own
+        // pool of shadow that dims whatever is under them, without the boxy
+        // look of a drawn label plate. haloRGB is a bare "r, g, b" triplet.
+        const HALO_PASSES = [[2.6, 0.22], [1.7, 0.45], [1.0, 1.0]];
+
+        function drawClusterLabel(lbl, color, haloRGB, haloAlpha, haloWidth) {
             const startY = lbl.y - (lbl.lines.length - 1) * lbl.lineHeight / 2;
+            ctx.lineJoin = 'round';
             for (let i = 0; i < lbl.lines.length; i++) {
                 const ly = startY + i * lbl.lineHeight;
-                if (haloColor) {
-                    ctx.strokeStyle = haloColor;
-                    ctx.lineWidth = haloWidth;
-                    ctx.lineJoin = 'round';
-                    ctx.strokeText(lbl.lines[i], lbl.x, ly);
+                if (haloRGB) {
+                    for (const [wScale, aScale] of HALO_PASSES) {
+                        ctx.strokeStyle = `rgba(${haloRGB}, ${haloAlpha * aScale})`;
+                        ctx.lineWidth = haloWidth * wScale;
+                        ctx.strokeText(lbl.lines[i], lbl.x, ly);
+                    }
                 }
                 ctx.fillStyle = color;
                 ctx.fillText(lbl.lines[i], lbl.x, ly);
@@ -884,22 +891,36 @@
             const isHovered = hoveredPoint === point;
 
             let radius = getRadius(point, zoom);
-            // Slightly translucent so the board art ghosts through and
-            // overlapping dots read as density instead of a white mass.
-            let alpha = 0.78;
+            // Cool-tinted and translucent rather than pure white: at full
+            // luminance the dot field out-shouts every label drawn over it.
+            // The blue cast also sits opposite the amber labels on the wheel,
+            // so the two separate by hue as well as brightness.
+            let alpha = 0.6;
+            let emphasis = false;
 
             if (isSearchActive && !isSearchMatch) alpha = 0.06;
-            if (isSearchMatch) { radius *= 1.5; alpha = 1; }
-            if (isHovered) { radius *= 1.4; alpha = 1; }
+            if (isSearchMatch) { radius *= 1.5; alpha = 1; emphasis = true; }
+            if (isHovered) { radius *= 1.4; alpha = 1; emphasis = true; }
 
-            // Plain white dot, hard edge — size alone carries mention count.
+            // Soft outer bloom under a brighter core reads as a lit node
+            // instead of a flat disc. Skipped on the smallest dots, where it
+            // would just smear the field into fog.
+            if (radius > 2.2 && alpha > 0.2) {
+                ctx.beginPath();
+                ctx.arc(sx, sy, radius * 2.1, 0, Math.PI * 2);
+                ctx.fillStyle = `rgba(126, 198, 245, ${alpha * (emphasis ? 0.22 : 0.1)})`;
+                ctx.fill();
+            }
+
             ctx.beginPath();
             ctx.arc(sx, sy, radius, 0, Math.PI * 2);
-            ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
+            ctx.fillStyle = emphasis
+                ? `rgba(255, 255, 255, ${alpha})`
+                : `rgba(224, 239, 252, ${alpha})`;
             ctx.fill();
 
-            if (isHovered || isSearchMatch) {
-                ctx.strokeStyle = '#fff';
+            if (emphasis) {
+                ctx.strokeStyle = 'rgba(140, 214, 255, 0.9)';
                 ctx.lineWidth = 1.5;
                 ctx.stroke();
             }
@@ -914,13 +935,20 @@
                                 (zoom > 5 && point.mention_count >= 1) ||
                                 isSearchMatch || isHovered;
 
-            if (shouldLabel && alpha > 0.5) {
+            if (shouldLabel && alpha > 0.2) {
                 const fs = Math.min(12, 10 * Math.sqrt(zoom / 4));
                 ctx.font = `600 ${fs}px "Baumans", -apple-system, sans-serif`;
                 ctx.textAlign = 'left';
                 ctx.textBaseline = 'middle';
-                ctx.globalAlpha = isHovered || isSearchMatch ? 0.95 : companyAlpha;
-                ctx.fillStyle = '#fff';
+                const la = isHovered || isSearchMatch ? 0.95 : companyAlpha;
+                // Same trick as the cluster labels, one pass: a dark rim so the
+                // name survives passing over a neighbouring dot.
+                ctx.lineJoin = 'round';
+                ctx.lineWidth = 2.4;
+                ctx.strokeStyle = `rgba(6, 7, 10, ${la * 0.7})`;
+                ctx.strokeText(point.name, sx + radius + 4, sy);
+                ctx.globalAlpha = la;
+                ctx.fillStyle = '#eef5fc';
                 ctx.fillText(point.name, sx + radius + 4, sy);
                 ctx.globalAlpha = 1;
             }
@@ -969,11 +997,11 @@
             const fontSize = Math.min(34, 21 * Math.sqrt(zoom / 1.2));
             const labels = computeLabelPositions(megas, fontSize, false);
             ctx.font = `700 ${fontSize}px "Baumans", -apple-system, BlinkMacSystemFont, sans-serif`;
-            const a = 0.92 * megaAlpha;
-            const haloW = Math.max(3, fontSize * 0.18);
+            const a = 0.95 * megaAlpha;
+            const haloW = Math.max(2.2, fontSize * 0.13);
             for (const lbl of labels) {
-                drawClusterLabel(lbl, `rgba(255, 191, 77, ${a})`,
-                                 `rgba(10, 8, 4, ${a * 0.9})`, haloW);
+                drawClusterLabel(lbl, `rgba(255, 197, 92, ${a})`,
+                                 '6, 7, 10', a * 0.8, haloW);
             }
         }
 
@@ -988,12 +1016,12 @@
                 const labels = computeLabelPositions(data.clusters, fontSize, true);
                 ctx.font = `700 ${fontSize}px "Baumans", -apple-system, BlinkMacSystemFont, sans-serif`;
 
-                const haloW = Math.max(2.5, fontSize * 0.18);
+                const haloW = Math.max(1.8, fontSize * 0.13);
                 for (const lbl of labels) {
-                    // Amber fill + dark outline halo: bright against the board,
-                    // dark-rimmed against the white dots.
-                    drawClusterLabel(lbl, `rgba(255, 191, 77, ${fgAlpha})`,
-                                     `rgba(10, 8, 4, ${fgAlpha * 0.9})`, haloW);
+                    // Amber fill over a soft dark aura: bright against the
+                    // board, and the aura punches a hole in the dot field.
+                    drawClusterLabel(lbl, `rgba(255, 197, 92, ${fgAlpha})`,
+                                     '6, 7, 10', fgAlpha * 0.8, haloW);
                 }
             }
         }
