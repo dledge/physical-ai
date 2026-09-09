@@ -805,7 +805,10 @@
                 if (sx < -400 || sx > width + 400 || sy < -400 || sy > height + 400) continue;
                 const lines = wrapClusterName(cluster.name, fontSize);
                 const maxW = Math.max(...lines.map(l => ctx.measureText(l).width));
-                const totalH = lines.length * lineHeight;
+                // Mega-regions carry a layer line drawn under the name in a
+                // smaller face; reserve its height so relaxation keeps it clear.
+                const subH = cluster.layer ? fontSize * 0.62 * 1.3 : 0;
+                const totalH = lines.length * lineHeight + subH;
                 labels.push({
                     cluster,
                     lines,
@@ -814,6 +817,7 @@
                     hw: maxW / 2 + 6,
                     hh: totalH / 2 + 4,
                     lineHeight,
+                    subH,
                 });
             }
             // Iterative relaxation — push overlapping labels apart
@@ -1000,8 +1004,20 @@
             const a = 0.95 * megaAlpha;
             const haloW = Math.max(2.2, fontSize * 0.13);
             for (const lbl of labels) {
+                // Name sits above its layer line; shift up by half the sub-line
+                // so the pair stays centered on the region.
+                lbl.y -= lbl.subH / 2;
                 drawClusterLabel(lbl, `rgba(255, 197, 92, ${a})`,
                                  '6, 7, 10', a * 0.8, haloW);
+                if (lbl.cluster.layer) {
+                    const subSize = fontSize * 0.62;
+                    const subY = lbl.y + (lbl.lines.length - 1) * lbl.lineHeight / 2
+                               + lbl.lineHeight * 0.5 + subSize * 0.75;
+                    ctx.font = `500 ${subSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
+                    drawClusterLabel({ lines: [lbl.cluster.layer], x: lbl.x, y: subY, lineHeight: subSize * 1.3 },
+                                     `rgba(190, 220, 255, ${a * 0.9})`, '6, 7, 10', a * 0.7, haloW * 0.8);
+                    ctx.font = `700 ${fontSize}px "Baumans", -apple-system, BlinkMacSystemFont, sans-serif`;
+                }
             }
         }
 
