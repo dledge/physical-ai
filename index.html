@@ -1,11 +1,8 @@
 <!DOCTYPE html>
-<!-- Physical AI map (domains/physical-ai/web/index.html): the standalone
-     project's page (Tron circuit-board backdrop, Baumans type, typewriter deep
-     panel), as published at https://dledge.github.io/physical-ai/ (v1.17),
-     on the platform's placeholders (core/site_render.py). v2.0 (2026-11-07,
-     platform port): the hover panel adds the profile lines (type, scale,
-     geography, partners), company descriptions appear under names at deep
-     zoom, and Esc clears the search. -->
+<!-- Knowledge Buddy entity map. Built by core/site_render.py from the shared
+     engine (core/web/map/: page.html, base.css, engine.js) and the domain's
+     theme (domains/<name>/web/theme/: head.html, theme.css, theme.js).
+     Edit those, not the rendered index.html. -->
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -32,184 +29,182 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Baumans&display=swap" rel="stylesheet">
+
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { background: #000; font-family: "Baumans", system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; overflow: hidden; color: #e0e0e0; }
+/* Map engine base: layout and behaviour every theme relies on. Colours,
+   fonts and chrome belong in the domain's theme.css, which loads after this. */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { overflow: hidden; background: #0b0d12; color: #e0e0e0; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
 
-        #canvas-container {
-            width: 100vw;
-            height: 100vh;
-            position: relative;
-            cursor: grab;
-        }
-        #canvas-container:active { cursor: grabbing; }
-        canvas { display: block; }
+#canvas-container { width: 100vw; height: 100vh; position: relative; cursor: grab; }
+#canvas-container:active { cursor: grabbing; }
+canvas { display: block; }
 
-        #tooltip {
-            display: none;
-            position: absolute;
-            background: rgba(15, 20, 35, 0.95);
-            border: 1px solid rgba(255,255,255,0.15);
-            border-radius: 8px;
-            padding: 12px 16px;
-            max-width: 350px;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
-            pointer-events: none;
-            z-index: 100;
-            font-size: 13px;
-            line-height: 1.5;
-            backdrop-filter: blur(10px);
-        }
-        #tooltip .name { font-weight: 700; font-size: 15px; color: #fff; margin-bottom: 4px; }
-        #tooltip .meta { color: rgba(255,255,255,0.5); font-size: 12px; margin-bottom: 6px; }
-        #tooltip .tags { color: rgba(120,200,255,0.7); font-size: 11px; margin-bottom: 6px; font-style: italic; }
-        #tooltip .desc { color: rgba(255,255,255,0.75); }
+/* Control panel: same controls, same order on every map */
+#controls { position: absolute; top: 20px; left: 20px; z-index: 50; width: min(300px, calc(100vw - 40px)); }
+.panel-head { display: flex; align-items: center; }
+.panel-head .chrome { display: none; }
+.title-plate { min-width: 0; }
+#controls .sub:empty { display: none; }
+.search-wrap { position: relative; }
+#search { width: 100%; outline: none; }
+#tag-suggest {
+    position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 60;
+    margin: 0; padding: 4px 0; list-style: none; max-height: 320px; overflow-y: auto;
+}
+#tag-suggest[hidden], #tag-chip[hidden], #filters .check[hidden] { display: none; }
+#tag-suggest li { padding: 6px 10px; cursor: pointer; }
+#tag-suggest li .t mark { background: none; color: inherit; font-weight: 700; }
+#tag-suggest li .n { float: right; font-variant-numeric: tabular-nums; }
+#tag-suggest li .d { display: block; line-height: 1.3; margin-top: 1px; }
+#tag-suggest .head { padding: 4px 10px 2px; cursor: default; }
+#tag-chip { display: flex; align-items: center; gap: 8px; margin-top: 8px; padding: 4px 6px 4px 10px; }
+#tag-chip .label { flex: 1; }
+#tag-chip button { border: none; background: none; color: inherit; font-size: 18px; line-height: 1; cursor: pointer; padding: 0 4px; }
+#filters label { display: flex; justify-content: space-between; margin-bottom: 2px; }
+#filters input[type=range] { width: 100%; }
+#filters .check { display: flex; justify-content: flex-start; align-items: center; gap: 8px; margin: 8px 0 4px; cursor: pointer; }
+#filters .check input { margin: 0; }
+#filters .ring { width: 10px; height: 10px; border-radius: 50%; border: 1.5px solid currentColor; flex: none; }
+#filter-count { font-variant-numeric: tabular-nums; }
 
-        /* Deep-hover secondary panel */
-        #deep-panel {
-            display: none;
-            position: absolute;
-            background: rgba(15, 20, 35, 0.95);
-            border: 1px solid rgba(130, 180, 235, 0.35);
-            border-radius: 8px;
-            padding: 14px 18px;
-            width: 420px;
-            max-height: 95vh;
-            overflow-y: auto;
-            box-shadow: 0 4px 30px rgba(0,0,0,0.6), 0 0 40px rgba(130,180,235,0.08);
-            pointer-events: none;
-            z-index: 99;
-            font-size: 13px;
-            line-height: 1.55;
-            backdrop-filter: blur(12px);
-            color: rgba(255,255,255,0.85);
-            opacity: 0;
-            transition: opacity 180ms ease;
-        }
-        #deep-panel.visible { opacity: 1; }
-        #deep-panel .title { font-weight: 700; font-size: 15px; color: #fff; margin-bottom: 10px; }
-        #deep-panel ul { list-style: none; padding-left: 4px; }
-        #deep-panel ul li {
-            margin-bottom: 7px;
-            color: rgba(255,255,255,0.78);
-            padding-left: 14px;
-            position: relative;
-        }
-        #deep-panel ul li::before {
-            content: "•";
-            position: absolute;
-            left: 0;
-            color: rgba(130,180,235,0.7);
-        }
-        /* Blinking cursor at the live typewriter position */
-        #deep-panel .cursor {
-            display: inline-block;
-            width: 7px;
-            background: rgba(130,180,235,0.85);
-            margin-left: 1px;
-            animation: blink 0.9s steps(1) infinite;
-        }
-        @keyframes blink { 50% { opacity: 0; } }
+/* Hover card and the deep panel (typewriter bullets) */
+#tooltip { display: none; position: absolute; max-width: 350px; pointer-events: none; z-index: 100; }
+#deep-panel {
+    display: none; position: absolute; width: 420px; max-width: calc(100vw - 24px); max-height: 95vh;
+    overflow-y: auto; pointer-events: none; z-index: 99; opacity: 0; transition: opacity 180ms ease;
+}
+#deep-panel.visible { opacity: 1; }
+#deep-panel ul { list-style: none; }
+#deep-panel ul li { position: relative; margin-bottom: 7px; }
+#deep-panel .cursor { display: inline-block; width: 7px; margin-left: 1px; background: currentColor; animation: kb-blink 0.9s steps(1) infinite; }
+@keyframes kb-blink { 50% { opacity: 0; } }
+#connector { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; pointer-events: none; z-index: 98; }
+#connector-line { stroke: rgba(130, 180, 235, 0.55); stroke-width: 1; }
 
-        /* Connector between tooltip and deep panel — full-viewport SVG, no
-           pointer capture so hover stays on the canvas. */
-        #connector {
-            position: absolute;
-            top: 0; left: 0;
-            width: 100vw; height: 100vh;
-            pointer-events: none;
-            z-index: 98;
-        }
+#zoom-controls { position: absolute; bottom: 20px; right: 20px; z-index: 50; display: flex; gap: 4px; }
+.zoom-btn { cursor: pointer; display: flex; align-items: center; justify-content: center; }
+#last-updated { position: absolute; bottom: 14px; left: 20px; z-index: 50; pointer-events: none; }
 
-        #controls {
-            position: absolute;
-            top: 20px;
-            left: 20px;
-            z-index: 50;
-        }
-        #controls h1 { font-size: 22px; font-weight: 700; color: #fff; margin-bottom: 16px; }
+    </style>
+    <style>
+/* Physical AI skin: a Tron circuit board at night, glass controls, Baumans
+   type, blue-white glowing nodes and amber region names. */
+body { background: #000; font-family: "Baumans", system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: #e0e0e0; }
 
-        #search {
-            width: 260px;
-            padding: 8px 12px;
-            border: 1px solid rgba(255,255,255,0.15);
-            border-radius: 6px;
-            font-size: 14px;
-            outline: none;
-            background: rgba(255,255,255,0.07);
-            color: #fff;
-        }
-        #search:focus { border-color: rgba(255,255,255,0.3); }
-        #search::placeholder { color: rgba(255,255,255,0.3); }
+/* ---------- Controls: a glass card holding glass boxes ---------- */
+#controls {
+    width: min(290px, calc(100vw - 40px));
+    padding: 12px 14px 14px;
+    border: 1px solid rgba(255,255,255,0.10);
+    border-radius: 10px;
+    background: rgba(8, 11, 20, 0.78);
+    backdrop-filter: blur(8px);
+    box-shadow: 0 8px 30px rgba(0,0,0,0.45);
+}
+#controls h1 { font-size: 22px; font-weight: 700; color: #fff; }
+#controls .sub { margin: 4px 0 12px; font-size: 13px; line-height: 1.3; color: rgba(255,255,255,0.55); letter-spacing: 0.02em; }
+#controls .sub:empty + .search-wrap { margin-top: 16px; }
 
-        #filters {
-            margin-top: 10px;
-            width: 260px;
-            padding: 10px 12px;
-            border: 1px solid rgba(255,255,255,0.12);
-            border-radius: 6px;
-            background: rgba(255,255,255,0.05);
-            font-size: 12px;
-            color: rgba(255,255,255,0.6);
-        }
-        #filters label {
-            display: flex;
-            justify-content: space-between;
-            margin-bottom: 2px;
-            letter-spacing: 0.03em;
-        }
-        #filters label .val { color: rgba(255,255,255,0.85); }
-        #filters input[type=range] {
-            width: 100%;
-            margin: 0 0 10px;
-            accent-color: rgba(130,180,235,0.9);
-        }
-        #filters input[type=range]:last-child { margin-bottom: 2px; }
-        #filter-count {
-            margin-top: 4px;
-            font-size: 11px;
-            color: rgba(255,255,255,0.4);
-        }
-        #corpus-note {
-            margin-top: 2px;
-            font-size: 11px;
-            color: rgba(255,255,255,0.4);
-        }
+#search {
+    padding: 8px 12px;
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 6px;
+    font: 14px "Baumans", system-ui, sans-serif;
+    background: rgba(255,255,255,0.06);
+    color: #fff;
+}
+#search:focus { border-color: rgba(255,255,255,0.3); }
+#search:focus-visible { outline: 2px solid rgba(130,180,235,0.7); outline-offset: 2px; }
+#search::placeholder { color: rgba(255,255,255,0.3); }
 
-        #zoom-controls {
-            position: absolute;
-            bottom: 20px;
-            right: 20px;
-            z-index: 50;
-            display: flex;
-            flex-direction: column;
-            gap: 4px;
-        }
-        .zoom-btn {
-            width: 36px;
-            height: 36px;
-            border: 1px solid rgba(255,255,255,0.15);
-            border-radius: 6px;
-            background: rgba(255,255,255,0.07);
-            font-size: 18px;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: rgba(255,255,255,0.7);
-        }
-        .zoom-btn:hover { background: rgba(255,255,255,0.12); }
+#tag-suggest {
+    background: rgba(15, 20, 35, 0.97); border: 1px solid rgba(255,255,255,0.15); border-radius: 6px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.6); backdrop-filter: blur(10px);
+}
+#tag-suggest li { color: rgba(255,255,255,0.85); font-size: 14px; }
+#tag-suggest li .t mark { color: rgb(255, 197, 92); font-weight: inherit; }
+#tag-suggest li .n { color: rgba(255,255,255,0.45); font-size: 12px; }
+#tag-suggest li .d { font-size: 11.5px; color: rgba(255,255,255,0.5); font-family: system-ui, -apple-system, sans-serif; }
+#tag-suggest li[aria-selected="true"] { background: rgba(130,180,235,0.15); }
+#tag-suggest .head { font-size: 11px; color: rgba(255,255,255,0.4); letter-spacing: 0.04em; }
+#tag-chip {
+    border-radius: 6px; font-size: 12.5px; color: rgba(255,255,255,0.85);
+    background: rgba(130,180,235,0.12); border: 1px solid rgba(130,180,235,0.4);
+}
+#tag-chip .label b { color: rgb(255, 197, 92); font-weight: 400; }
+#tag-chip button { color: rgba(255,255,255,0.7); }
 
-        #last-updated {
-            position: absolute;
-            bottom: 14px;
-            left: 20px;
-            z-index: 50;
-            font-size: 11px;
-            color: rgba(255,255,255,0.35);
-            letter-spacing: 0.04em;
-            pointer-events: none;
-        }
+#filters {
+    margin-top: 10px;
+    padding: 10px 12px;
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 6px;
+    background: rgba(255,255,255,0.04);
+    font-size: 12px;
+    color: rgba(255,255,255,0.6);
+}
+#filters label { letter-spacing: 0.03em; }
+#filters label .val { color: rgba(255,255,255,0.85); }
+#filters input[type=range] { margin: 0 0 10px; accent-color: rgba(130,180,235,0.9); }
+#filters .check { margin: 0 0 6px; }
+#filters .check input { accent-color: rgba(130,180,235,0.9); }
+#filters .ring { color: rgb(255, 197, 92); }
+#filter-count { margin-top: 4px; font-size: 11px; color: rgba(255,255,255,0.4); }
+
+/* ---------- Hover card and deep panel ---------- */
+#tooltip {
+    background: rgba(15, 20, 35, 0.95);
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 8px;
+    padding: 12px 16px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+    font-size: 13px;
+    line-height: 1.5;
+    backdrop-filter: blur(10px);
+}
+#tooltip .name { font-weight: 700; font-size: 15px; color: #fff; margin-bottom: 4px; }
+#tooltip .meta { color: rgba(255,255,255,0.5); font-size: 12px; margin-bottom: 6px; }
+#tooltip .tags { color: rgba(120,200,255,0.7); font-size: 11px; margin-bottom: 6px; font-style: italic; }
+#tooltip .desc { color: rgba(255,255,255,0.75); }
+
+#deep-panel {
+    background: rgba(15, 20, 35, 0.95);
+    border: 1px solid rgba(130, 180, 235, 0.35);
+    border-radius: 8px;
+    padding: 14px 18px;
+    box-shadow: 0 4px 30px rgba(0,0,0,0.6), 0 0 40px rgba(130,180,235,0.08);
+    font-size: 13px;
+    line-height: 1.55;
+    backdrop-filter: blur(12px);
+    color: rgba(255,255,255,0.85);
+}
+#deep-panel .title { font-weight: 700; font-size: 15px; color: #fff; margin-bottom: 10px; }
+#deep-panel ul { padding-left: 4px; }
+#deep-panel ul li { color: rgba(255,255,255,0.78); padding-left: 14px; }
+#deep-panel ul li::before { content: "•"; position: absolute; left: 0; color: rgba(130,180,235,0.7); }
+#deep-panel .cursor { background: rgba(130,180,235,0.85); }
+#connector-line { stroke: rgba(130,180,235,0.55); stroke-width: 1; }
+
+/* ---------- Zoom keys and footer ---------- */
+#zoom-controls { flex-direction: column; }
+.zoom-btn {
+    width: 36px;
+    height: 36px;
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 6px;
+    background: rgba(255,255,255,0.07);
+    font-size: 18px;
+    color: rgba(255,255,255,0.7);
+}
+.zoom-btn:hover { background: rgba(255,255,255,0.12); }
+#zoom-reset { font-size: 12px; }
+
+#last-updated {
+    font-size: 11px; color: rgba(255,255,255,0.5); letter-spacing: 0.04em;
+    padding: 3px 8px; margin-left: -8px; border-radius: 4px; background: rgba(8, 11, 20, 0.6);
+}
+
     </style>
     <script defer src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "1b875e43e9c9482680d4cf6a3aecfaf7"}'></script>
 </head>
@@ -219,15 +214,31 @@
     </div>
 
     <div id="controls">
-        <h1>Physical AI: Entity Map</h1>
-        <input type="text" id="search" placeholder="Search entities...">
+        <div class="panel-head">
+            <span class="chrome chrome-left" aria-hidden="true"></span>
+            <div class="title-plate"><h1>Physical AI</h1></div>
+            <span class="chrome chrome-right" aria-hidden="true"></span>
+        </div>
+        <div class="sub">Who builds machines that sense and act, clustered by what they do</div>
+        <div class="search-wrap">
+            <input type="text" id="search" placeholder="Search companies or tags" aria-label="Search companies or tags"
+                   role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="tag-suggest" autocomplete="off">
+            <ul id="tag-suggest" role="listbox" aria-label="Tags" hidden></ul>
+        </div>
+        <div id="tag-chip" hidden>
+            <span class="label"></span>
+            <button type="button" id="tag-clear" aria-label="Clear tag filter">&times;</button>
+        </div>
         <div id="filters">
             <label for="mention-slider">Min mentions <span class="val" id="mention-val">2</span></label>
             <input type="range" id="mention-slider" min="1" max="20" value="2">
             <label for="score-slider">Min relevance <span class="val" id="score-val">0.30</span></label>
             <input type="range" id="score-slider" min="0" max="0.95" step="0.05" value="0.3">
+            <label class="check" id="research-filter" for="research-only" hidden>
+                <input type="checkbox" id="research-only"><span class="ring" aria-hidden="true"></span>
+                Research projects only
+            </label>
             <div id="filter-count"></div>
-            <div id="corpus-note"></div>
         </div>
     </div>
 
@@ -240,7 +251,6 @@
 
     <svg id="connector">
         <line id="connector-line" x1="0" y1="0" x2="0" y2="0"
-              stroke="rgba(130,180,235,0.55)" stroke-width="1"
               stroke-dasharray="160" stroke-dashoffset="160" />
     </svg>
 
@@ -250,16 +260,16 @@
     </div>
 
     <div id="zoom-controls">
-        <button class="zoom-btn" id="zoom-in">+</button>
-        <button class="zoom-btn" id="zoom-out">-</button>
-        <button class="zoom-btn" id="zoom-reset" style="font-size:12px">&#8962;</button>
+        <button class="zoom-btn" id="zoom-in" aria-label="Zoom in">+</button>
+        <button class="zoom-btn" id="zoom-out" aria-label="Zoom out">&minus;</button>
+        <button class="zoom-btn" id="zoom-reset" aria-label="Reset view">&#8962;</button>
     </div>
 
     <div id="last-updated"></div>
 
     <script>
-    // Rendered by build_visualization.py from the domain's MACRO_CATEGORIES
-    // (in order) over a fixed palette, plus 'Other'.
+    // Site settings (core/site_render.py) and the domain's category colours.
+    const SITE = {"name": "Physical AI", "credit": "Dan Ledger", "tagline": "Who builds machines that sense and act, clustered by what they do"};
     const CATEGORY_COLORS = {
         "Edge Silicon & Compute": "#e63946",
         "Sensors & Components": "#2a9d8f",
@@ -270,80 +280,14 @@
         "Investment, Policy & Research": "#64748b",
         "Other": "#9ca3af"
 };
-    const CATEGORY_GLOW = Object.fromEntries(Object.entries(CATEGORY_COLORS).map(([k, hex]) => {
-        const n = parseInt(hex.slice(1), 16);
-        const a = (k === 'Other' || hex === '#64748b') ? 0.3 : 0.4;
-        return [k, `rgba(${n >> 16}, ${(n >> 8) & 255}, ${n & 255}, ${a})`];
-    }));
-
-    function getRadius(point, zoom) {
-        // Wider range than the old star look so mention count reads directly
-        // as dot size: 1 mention ≈ 1.6px, 600+ mentions ≈ 9px at rest zoom.
-        const base = Math.max(1.6, Math.min(9, Math.log2(point.mention_count + 1) * 1.6));
-        return base * Math.min(zoom, 3);
-    }
-
-    let data = null;
-    let canvas, ctx;
-    let width, height;
-    let offsetX = 0, offsetY = 0;
-    let targetOffsetX = 0, targetOffsetY = 0;
-    const MIN_ZOOM = 1.2;  // also the initial / reset zoom
-    const DESC_START = 16; // zoom where descriptions appear under company names
-
-    // A company's description wrapped to a narrow column (max 3 lines), cached
-    // per font size. ctx.font must already be set to the description font.
-    function descLines(point, size) {
-        const key = Math.round(size * 2);
-        if (point._descKey === key) return point._desc;
-        const maxW = size * 19;
-        const words = String(point.description).split(/\s+/);
-        const lines = [];
-        let cur = '';
-        for (const w of words) {
-            const next = cur ? cur + ' ' + w : w;
-            if (ctx.measureText(next).width > maxW && cur) {
-                lines.push(cur);
-                cur = w;
-                if (lines.length === 3) break;
-            } else {
-                cur = next;
-            }
-        }
-        if (lines.length < 3 && cur) lines.push(cur);
-        else if (lines.length === 3 && cur) lines[2] = lines[2].replace(/[,.;:]?$/, '…');
-        point._descKey = key;
-        point._desc = lines;
-        return lines;
-    }
-    let zoom = MIN_ZOOM;
-    let targetZoom = MIN_ZOOM;
-    // Camera-smoothing rate (per second). Frame-rate independent: the actual
-    // per-frame factor is derived via 1 - exp(-rate * dt), so 60Hz displays and
-    // 120Hz ProMotion panels converge at the same real-time speed.
-    // Tuned to match the old 0.02/frame @ 60Hz feel.
-    const CAMERA_EASE_RATE = 1.2;
-    let lastFrameTime = 0;
-    let dragging = false;
-    let dragStartX, dragStartY;
-    let searchTerm = '';
-    let hoveredPoint = null;
-    let mentionThreshold = 2;
-    let scoreThreshold = 0.3;
-
-    let minX, maxX, minY, maxY, rangeX, rangeY;
-
-    // D3 force simulation
-    let simulation = null;
-    let nodes = [];
-
-    // --- Tron background: procedural circuit-panel backdrop that pans and
-    // zooms with the data, with fractal level-of-detail. The board is an
-    // infinite surface tiled per detail octave: level L features are 4^L times
-    // smaller than level 0 and fade in as the camera approaches their native
-    // zoom, so zooming in turns thin traces into huge panels while a finer
-    // generation of circuitry materializes beneath them. Tiles are generated
-    // lazily from a per-cell seed — stable within a page load, fresh on reload.
+    </script>
+    <script>
+// Physical AI theme: a procedural Tron circuit board that pans and zooms
+// with the map (fractal level of detail), blue-white glowing nodes, Baumans
+// type, amber region names, marching-ants hulls. Look only: behaviour is in
+// core/web/map/engine.js (hooks documented there).
+const THEME = (() => {
+    const FONT = '"Baumans", -apple-system, BlinkMacSystemFont, sans-serif';
     const TRON_PLATE  = '#101319';   // base panel color
     const TRON_GROOVE = '#07090d';   // carved gaps between panels
     const TRON_NEON   = ['#35d5f5', '#2f7bff', '#4fe3c0'];  // trace palette
@@ -611,775 +555,991 @@
         ctx.fillRect(0, 0, width, height);
     }
 
-    function init() {
-        canvas = document.getElementById('canvas');
-        ctx = canvas.getContext('2d');
-        resize();
-        resetTronBackground();
-        window.addEventListener('resize', () => { resize(); resetTronBackground(); });
-
-        canvas.addEventListener('mousedown', onMouseDown);
-        canvas.addEventListener('mousemove', onMouseMove);
-        canvas.addEventListener('mouseup', onMouseUp);
-        canvas.addEventListener('mouseleave', onMouseUp);
-        canvas.addEventListener('wheel', onWheel, { passive: false });
-
-        canvas.addEventListener('touchstart', onTouchStart, { passive: false });
-        canvas.addEventListener('touchmove', onTouchMove, { passive: false });
-        canvas.addEventListener('touchend', onTouchEnd);
-
-        document.getElementById('zoom-in').addEventListener('click', () => { targetZoom = Math.min(50, targetZoom * 1.3); });
-        document.getElementById('zoom-out').addEventListener('click', () => { targetZoom = Math.max(MIN_ZOOM, targetZoom / 1.3); });
-        document.getElementById('zoom-reset').addEventListener('click', () => { targetZoom = MIN_ZOOM; targetOffsetX = 0; targetOffsetY = 0; });
-        document.getElementById('search').addEventListener('input', (e) => { searchTerm = e.target.value.toLowerCase(); });
-        // Esc clears the search, wherever the focus is.
-        document.addEventListener('keydown', (e) => {
-            if (e.key !== 'Escape') return;
-            const box = document.getElementById('search');
-            if (!box.value && !searchTerm) return;
-            box.value = ''; searchTerm = '';
-            box.blur();
-        });
-        document.getElementById('mention-slider').addEventListener('input', (e) => {
-            mentionThreshold = +e.target.value;
-            document.getElementById('mention-val').textContent = e.target.value;
-            updateFilterCount();
-        });
-        document.getElementById('score-slider').addEventListener('input', (e) => {
-            scoreThreshold = +e.target.value;
-            document.getElementById('score-val').textContent =
-                scoreThreshold > 0 ? scoreThreshold.toFixed(2) : 'off';
-            updateFilterCount();
-        });
-
-        loadData();
-    }
-
-    async function loadData() {
-        const resp = await fetch('data.json');
-        data = await resp.json();
-
-        // Version + last-updated note — bump APP_VERSION on notable UX/pipeline changes.
-        const APP_VERSION = 'v2.0';
-        if (data.generated_at) {
-            const d = new Date(data.generated_at);
-            const mm = String(d.getMonth() + 1).padStart(2, '0');
-            const yyyy = d.getFullYear();
-            document.getElementById('last-updated').textContent =
-                `${APP_VERSION}, data last updated ${mm}-${yyyy} · created by Dan Ledger`;
-        } else {
-            document.getElementById('last-updated').textContent =
-                `${APP_VERSION} · created by Dan Ledger`;
-        }
-
-        if (data.total_articles) {
-            document.getElementById('corpus-note').textContent =
-                `distilled from ${data.total_articles.toLocaleString()} news articles`;
-        }
-
-        minX = Infinity; maxX = -Infinity;
-        minY = Infinity; maxY = -Infinity;
-        for (const p of data.points) {
-            minX = Math.min(minX, p.x);
-            maxX = Math.max(maxX, p.x);
-            minY = Math.min(minY, p.y);
-            maxY = Math.max(maxY, p.y);
-        }
-        rangeX = maxX - minX || 1;
-        rangeY = maxY - minY || 1;
-
-        // Initialize nodes for D3 force simulation
-        nodes = data.points.map(p => ({
-            ...p,
-            targetX: p.x,
-            targetY: p.y,
-            x: p.x + (Math.random() - 0.5) * 0.1,
-            y: p.y + (Math.random() - 0.5) * 0.1,
-        }));
-
-        data.points = nodes;
-        updateFilterCount();
-        initSimulation();
-        startRenderLoop();
-    }
-
-    function initSimulation() {
-        const driftStrength = 0.00008;
-
-        for (const node of nodes) {
-            node.targetX = node.x;
-            node.targetY = node.y;
-        }
-
-        simulation = d3.forceSimulation(nodes)
-            .force('targetX', d3.forceX(d => d.targetX).strength(0.08))
-            .force('targetY', d3.forceY(d => d.targetY).strength(0.08))
-            .alphaDecay(0)
-            .alphaTarget(0.005)
-            .velocityDecay(0.7)
-            .on('tick', () => {
-                for (const node of nodes) {
-                    node.vx += (Math.random() - 0.5) * driftStrength;
-                    node.vy += (Math.random() - 0.5) * driftStrength;
-                }
-            });
-    }
-
-    function startRenderLoop() {
-        function loop(time) {
-            render(time);
-            requestAnimationFrame(loop);
-        }
-        requestAnimationFrame(loop);
-    }
-
-    function isPointVisible(point) {
-        if (point.mention_count < mentionThreshold) return false;
-        // Points without a score (shouldn't happen post-scoring, but old
-        // data.json builds lack the field) are exempt rather than hidden.
-        if (scoreThreshold > 0 && point.score != null && point.score < scoreThreshold) return false;
-        return true;
-    }
-
-    function updateFilterCount() {
-        if (!data) return;
-        const shown = data.points.filter(isPointVisible).length;
-        document.getElementById('filter-count').textContent =
-            shown === data.points.length
-                ? `${data.points.length} entities`
-                : `${shown} of ${data.points.length} entities`;
-    }
-
-    function resize() {
-        width = window.innerWidth;
-        height = window.innerHeight;
-        canvas.width = width * devicePixelRatio;
-        canvas.height = height * devicePixelRatio;
-        canvas.style.width = width + 'px';
-        canvas.style.height = height + 'px';
-        ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
-    }
-
-    function toScreen(px, py) {
-        const margin = 60;
-        const scale = Math.min((width - margin * 2) / rangeX, (height - margin * 2) / rangeY);
-        const cx = width / 2, cy = height / 2;
-        const mx = (minX + maxX) / 2, my = (minY + maxY) / 2;
-        return [cx + (px - mx) * scale * zoom + offsetX, cy + (py - my) * scale * zoom + offsetY];
-    }
-
-    function fromScreen(sx, sy) {
-        const margin = 60;
-        const scale = Math.min((width - margin * 2) / rangeX, (height - margin * 2) / rangeY);
-        const cx = width / 2, cy = height / 2;
-        const mx = (minX + maxX) / 2, my = (minY + maxY) / 2;
-        return [(sx - cx - offsetX) / (scale * zoom) + mx, (sy - cy - offsetY) / (scale * zoom) + my];
-    }
-
-    function render(time = 0) {
-        // Ease camera state toward targets — gives zoom/wheel/pinch that
-        // floating-through-space feel instead of a hard snap.
-        // Delta-time-aware so 60Hz and 120Hz displays feel the same.
-        const dt = lastFrameTime ? Math.min((time - lastFrameTime) / 1000, 0.1) : 1 / 60;
-        lastFrameTime = time;
-        const ease = 1 - Math.exp(-CAMERA_EASE_RATE * dt);
-        zoom    += (targetZoom    - zoom)    * ease;
-        offsetX += (targetOffsetX - offsetX) * ease;
-        offsetY += (targetOffsetY - offsetY) * ease;
-
-        drawTronBackground(time);
-
-        if (!data) return;
-
-        // Zoom thresholds for label transitions. Cluster labels are visible
-        // from the initial zoom (MIN_ZOOM 1.2 > 1.0) — the map reads as
-        // labeled territories at rest, not on zoom-in.
-        const clusterLabelFadeIn = 1.0;   // cluster names start appearing
-        const companyLabelStart = 7.5;    // company names start appearing
-        // After companyLabelStart, cluster labels transition to background layer
-
-        // --- Word-wrap cluster name into lines targeting a squarish shape ---
-        function wrapClusterName(name, fontSize) {
-            ctx.font = `700 ${fontSize}px "Baumans", -apple-system, BlinkMacSystemFont, sans-serif`;
-            const words = name.split(' ');
-            if (words.length <= 2) return [name];
-
-            // Try different line counts and pick the most square result
-            let bestLines = [name];
-            let bestRatio = Infinity;
-            for (let nLines = 2; nLines <= Math.min(3, words.length); nLines++) {
-                const lines = [];
-                const wordsPerLine = Math.ceil(words.length / nLines);
-                for (let i = 0; i < words.length; i += wordsPerLine) {
-                    lines.push(words.slice(i, i + wordsPerLine).join(' '));
-                }
-                const maxW = Math.max(...lines.map(l => ctx.measureText(l).width));
-                const totalH = lines.length * fontSize * 1.3;
-                const ratio = Math.abs(Math.log(maxW / totalH));
-                if (ratio < bestRatio) {
-                    bestRatio = ratio;
-                    bestLines = lines;
-                }
-            }
-            return bestLines;
-        }
-
-        // --- Compute nudged label positions to avoid overlap ---
-        // Works for any list of {name, center_x, center_y}; checkMembers
-        // hides cluster labels whose members are all filtered out.
-        function computeLabelPositions(items, fontSize, checkMembers) {
-            ctx.font = `700 ${fontSize}px "Baumans", -apple-system, BlinkMacSystemFont, sans-serif`;
-            const lineHeight = fontSize * 1.3;
-            const labels = [];
-            for (const cluster of items) {
-                if (checkMembers) {
-                    const hasVisible = data.points.some(p => p.cluster_id === cluster.id && isPointVisible(p));
-                    if (!hasVisible) continue;
-                }
-                const [sx, sy] = toScreen(cluster.center_x, cluster.center_y);
-                if (sx < -400 || sx > width + 400 || sy < -400 || sy > height + 400) continue;
-                const lines = wrapClusterName(cluster.name, fontSize);
-                const maxW = Math.max(...lines.map(l => ctx.measureText(l).width));
-                const totalH = lines.length * lineHeight;
-                labels.push({
-                    cluster,
-                    lines,
-                    x: sx,
-                    y: sy,
-                    hw: maxW / 2 + 6,
-                    hh: totalH / 2 + 4,
-                    lineHeight,
-                });
-            }
-            // Iterative relaxation — push overlapping labels apart
-            for (let iter = 0; iter < 8; iter++) {
-                for (let i = 0; i < labels.length; i++) {
-                    for (let j = i + 1; j < labels.length; j++) {
-                        const a = labels[i], b = labels[j];
-                        const ox = (a.hw + b.hw) - Math.abs(a.x - b.x);
-                        const oy = (a.hh + b.hh) - Math.abs(a.y - b.y);
-                        if (ox > 0 && oy > 0) {
-                            if (oy < ox) {
-                                const push = oy * 0.52;
-                                if (a.y < b.y) { a.y -= push; b.y += push; }
-                                else { a.y += push; b.y -= push; }
-                            } else {
-                                const push = ox * 0.52;
-                                if (a.x < b.x) { a.x -= push; b.x += push; }
-                                else { a.x += push; b.x -= push; }
-                            }
-                        }
-                    }
-                }
-            }
-            return labels;
-        }
-
-        // --- Draw multi-line centered text over a soft dark aura.
-        // A single outline stroke gets swamped where dots pile up, so the halo
-        // is three widening passes at falling alpha: the glyphs carry their own
-        // pool of shadow that dims whatever is under them, without the boxy
-        // look of a drawn label plate. haloRGB is a bare "r, g, b" triplet.
-        const HALO_PASSES = [[2.6, 0.22], [1.7, 0.45], [1.0, 1.0]];
-
-        function drawClusterLabel(lbl, color, haloRGB, haloAlpha, haloWidth) {
-            const startY = lbl.y - (lbl.lines.length - 1) * lbl.lineHeight / 2;
-            ctx.lineJoin = 'round';
-            for (let i = 0; i < lbl.lines.length; i++) {
-                const ly = startY + i * lbl.lineHeight;
-                if (haloRGB) {
-                    for (const [wScale, aScale] of HALO_PASSES) {
-                        ctx.strokeStyle = `rgba(${haloRGB}, ${haloAlpha * aScale})`;
-                        ctx.lineWidth = haloWidth * wScale;
-                        ctx.strokeText(lbl.lines[i], lbl.x, ly);
-                    }
-                }
-                ctx.fillStyle = color;
-                ctx.fillText(lbl.lines[i], lbl.x, ly);
-            }
-        }
-
-        // --- Cluster labels: background layer (large, dim — deep-zoom wayfinding) ---
-        const bgPhase = zoom > companyLabelStart ? Math.min(1, (zoom - companyLabelStart) / 3.0) : 0;
-        if (zoom > clusterLabelFadeIn && bgPhase > 0) {
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            const bgAlpha = 0.2 * (1 - bgPhase * 0.4);
-            const fontSize = Math.min(80, 18 * Math.sqrt(zoom / 2));
-            const labels = computeLabelPositions(data.clusters, fontSize, true);
-            ctx.font = `800 ${fontSize}px "Baumans", -apple-system, BlinkMacSystemFont, sans-serif`;
-
-            for (const lbl of labels) {
-                drawClusterLabel(lbl, `rgba(200, 150, 60, ${bgAlpha})`);
-            }
-        }
-
-        // --- Entity nodes ---
-        const nameRects = [], descQueue = [];
-        for (const point of data.points) {
-            if (!isPointVisible(point)) continue;
-
-            const [sx, sy] = toScreen(point.x, point.y);
-            if (sx < -80 || sx > width + 80 || sy < -80 || sy > height + 80) continue;
-
-            const isSearchMatch = searchTerm && point.name.toLowerCase().includes(searchTerm);
-            const isSearchActive = searchTerm.length > 0;
-            const isHovered = hoveredPoint === point;
-
-            let radius = getRadius(point, zoom);
-            // Cool-tinted and translucent rather than pure white: at full
-            // luminance the dot field out-shouts every label drawn over it.
-            // The blue cast also sits opposite the amber labels on the wheel,
-            // so the two separate by hue as well as brightness.
-            let alpha = 0.6;
-            let emphasis = false;
-
-            if (isSearchActive && !isSearchMatch) alpha = 0.06;
-            if (isSearchMatch) { radius *= 1.5; alpha = 1; emphasis = true; }
-            if (isHovered) { radius *= 1.4; alpha = 1; emphasis = true; }
-
-            // Soft outer bloom under a brighter core reads as a lit node
-            // instead of a flat disc. Skipped on the smallest dots, where it
-            // would just smear the field into fog.
+    return {
+        scoreDefault: 0.3,
+        dotAlpha: 0.6,
+        researchRGB: '255, 197, 92',
+        labels: {
+            mega:      { font: s => `700 ${s}px ${FONT}`, rgb: '255, 197, 92', halo: '6, 7, 10', haloK: 0.8 },
+            cluster:   { font: s => `700 ${s}px ${FONT}`, rgb: '255, 197, 92', halo: '6, 7, 10', haloK: 0.8 },
+            clusterBg: { font: s => `800 ${s}px ${FONT}`, rgb: '200, 150, 60' },
+            name: { size: z => Math.min(12, 10 * Math.sqrt(z / 4)), font: fs => `600 ${fs}px "Baumans", -apple-system, sans-serif`,
+                    fill: '#eef5fc', rim: '6, 7, 10', rimK: 0.7, rimW: () => 2.4 },
+            desc: { size: fs => Math.max(10, fs * 0.8), font: s => `400 ${s}px system-ui, -apple-system, "Segoe UI", sans-serif`,
+                    rgb: '160, 200, 232', rim: '6, 7, 10', rimK: 0.75 },
+        },
+        hulls: {
+            dash: [7, 5], march: 0.02,
+            mega:    { rgb: '150, 205, 255', a: 0.6,  w: 1.4 },
+            cluster: { rgb: '150, 205, 255', a: 0.55, w: 1.2 },
+        },
+        resize: resetTronBackground,
+        drawBackground: drawTronBackground,
+        drawDot(point, sx, sy, radius, alpha, emphasis) {
+            // Soft blue bloom under a brighter core: a lit node, not a flat disc.
             if (radius > 2.2 && alpha > 0.2) {
                 ctx.beginPath();
                 ctx.arc(sx, sy, radius * 2.1, 0, Math.PI * 2);
                 ctx.fillStyle = `rgba(126, 198, 245, ${alpha * (emphasis ? 0.22 : 0.1)})`;
                 ctx.fill();
             }
-
             ctx.beginPath();
             ctx.arc(sx, sy, radius, 0, Math.PI * 2);
-            ctx.fillStyle = emphasis
-                ? `rgba(255, 255, 255, ${alpha})`
-                : `rgba(224, 239, 252, ${alpha})`;
+            ctx.fillStyle = emphasis ? `rgba(255, 255, 255, ${alpha})` : `rgba(224, 239, 252, ${alpha})`;
             ctx.fill();
-
             if (emphasis) {
                 ctx.strokeStyle = 'rgba(140, 214, 255, 0.9)';
                 ctx.lineWidth = 1.5;
                 ctx.stroke();
             }
+            return radius;
+        },
+    };
+})();
 
-            // Company name labels — appear as we zoom past cluster labels
-            // Slow ramp: company names drift in over ~4-5 zoom units while the
-            // cluster names are fading to the background layer, so the two
-            // label generations crossfade instead of clashing.
-            const companyAlpha = zoom > companyLabelStart ? Math.min(0.85, (zoom - companyLabelStart) * 0.18) : 0;
+    </script>
+    <script>
+// Knowledge Buddy map engine: every behaviour of the entity map, shared by
+// all domains. A domain's look lives in domains/<name>/web/theme/ (theme.js
+// sets THEME before this script runs; theme.css, header.html, head.html);
+// core/site_render.py inlines both into one self-contained index.html.
+//
+// Add a feature here and every domain gets it; bump MAP_VERSION when you do.
+// Restyle a domain in its theme. Hooks the engine calls on THEME (all
+// optional, defaults below):
+//   init(), resize()                       once at start / on every resize
+//   prepareNode(node)                      per point, when data loads
+//   drawBackground(time)                   the backdrop, every frame
+//   drawUnderDots(time, phase)             between background labels and dots
+//   drawDot(p, sx, sy, r, alpha, emph, t)  one company; return the radius drawn
+//   drawOverDots(time)                     after dots/names, before the hulls
+//   afterFrame(time)                       over everything (film grain...)
+//   onHover(point)                         hovered company changed (point or null)
+// and reads THEME.labels / THEME.hulls / THEME.dotAlpha / THEME.researchRGB /
+// THEME.scoreDefault / THEME.mentionDefault (see DEFAULT_THEME).
+// Page globals (data, zoom, targetZoom, offsetX, offsetY, toScreen, ctx,
+// width, height...) are plain top-level bindings a theme may read.
 
-            const shouldLabel = (companyAlpha > 0 && point.mention_count >= 2) ||
-                                (zoom > 5 && point.mention_count >= 1) ||
-                                isSearchMatch || isHovered;
+const MAP_VERSION = 'v1.24';
 
-            if (shouldLabel && alpha > 0.2) {
-                const fs = Math.min(12, 10 * Math.sqrt(zoom / 4));
-                ctx.font = `600 ${fs}px "Baumans", -apple-system, sans-serif`;
-                ctx.textAlign = 'left';
-                ctx.textBaseline = 'middle';
-                const la = isHovered || isSearchMatch ? 0.95 : companyAlpha;
-                // Same trick as the cluster labels, one pass: a dark rim so the
-                // name survives passing over a neighbouring dot.
-                ctx.lineJoin = 'round';
-                ctx.lineWidth = 2.4;
-                ctx.strokeStyle = `rgba(6, 7, 10, ${la * 0.7})`;
-                ctx.strokeText(point.name, sx + radius + 4, sy);
-                ctx.globalAlpha = la;
-                ctx.fillStyle = '#eef5fc';
-                ctx.fillText(point.name, sx + radius + 4, sy);
-                ctx.globalAlpha = 1;
-
-                // Deepest zoom: queue the description; it is drawn after every
-                // name is placed, only where it collides with nothing.
-                const lx = sx + radius + 4;
-                nameRects.push([lx - 2, sy - fs * 0.6, lx + ctx.measureText(point.name).width + 2, sy + fs * 0.6, point]);
-                const da = zoom > DESC_START ? Math.min(1, (zoom - DESC_START) / 4) * la : 0;
-                if (da > 0.05 && point.description && sx > -300 && sx < width && sy > -60 && sy < height + 20) {
-                    descQueue.push({ point, lx, sy, fs, da, first: isHovered || isSearchMatch });
-                }
-            }
-        }
-
-        // Descriptions under names (deepest zoom): hovered/searched first, then
-        // the most-covered companies; any that would overlap a name or an
-        // already drawn description is left out (hover still shows it).
-        if (descQueue.length) {
-            descQueue.sort((a, b) => (b.first - a.first) || (b.point.mention_count - a.point.mention_count));
-            const placed = [];
-            const hits = (r, list, self) => list.some(o => o[4] !== self && r[0] < o[2] && r[2] > o[0] && r[1] < o[3] && r[3] > o[1]);
-            for (const q of descQueue) {
-                const dfs = Math.max(10, q.fs * 0.8);
-                ctx.font = `400 ${dfs}px system-ui, -apple-system, "Segoe UI", sans-serif`;
-                const lines = descLines(q.point, dfs);
-                const top = q.sy + q.fs * 0.62;
-                const w = Math.max(...lines.map(l => ctx.measureText(l).width));
-                const r = [q.lx - 2, top, q.lx + w + 2, top + lines.length * dfs * 1.22 + 2, q.point];
-                if (!q.first && (hits(r, nameRects, q.point) || hits(r, placed, null))) continue;
-                placed.push(r);
-                ctx.textAlign = 'left';
-                ctx.textBaseline = 'middle';
-                ctx.lineJoin = 'round';
-                ctx.lineWidth = Math.max(2.2, dfs * 0.22);
-                ctx.strokeStyle = `rgba(6, 7, 10, ${q.da * 0.75})`;
-                ctx.fillStyle = `rgba(160, 200, 232, ${q.da})`;
-                let ly = top + dfs * 0.75;
-                for (const line of lines) {
-                    ctx.strokeText(line, q.lx, ly);
-                    ctx.fillText(line, q.lx, ly);
-                    ly += dfs * 1.22;
-                }
-            }
-        }
-
-        // --- Semantic zoom: mega-regions at rest crossfade into clusters,
-        // which later crossfade into company names (bgPhase above).
-        const clusterPhase = Math.min(1, Math.max(0, (zoom - 1.9) / 1.3));
-        const megaAlpha = 1 - clusterPhase;
-        const megas = data.megaclusters || [];
-
-        function strokeHull(boundary) {
-            if (!boundary || boundary.length < 3) return;
+const DEFAULT_FONT = 'system-ui, -apple-system, "Segoe UI", sans-serif';
+const DEFAULT_THEME = {
+    scoreDefault: 0.3,          // min-relevance slider at load
+    mentionDefault: 2,          // min-mentions slider at load
+    dotAlpha: 0.6,              // resting dot opacity
+    researchRGB: '255, 197, 92',// ring around research projects
+    labels: {
+        // fill/halo/drop are bare "r, g, b" triplets; k scales the layer alpha.
+        mega:      { font: s => `700 ${s}px ${DEFAULT_FONT}`, rgb: '255, 197, 92', k: 1, halo: '6, 7, 10', haloK: 0.8, drop: null },
+        cluster:   { font: s => `700 ${s}px ${DEFAULT_FONT}`, rgb: '255, 197, 92', k: 1, halo: '6, 7, 10', haloK: 0.8 },
+        clusterBg: { font: s => `800 ${s}px ${DEFAULT_FONT}`, rgb: '200, 150, 60', k: 1 },
+        name: { size: z => Math.min(12, 10 * Math.sqrt(z / 4)), font: fs => `600 ${fs}px ${DEFAULT_FONT}`,
+                fill: '#eef5fc', rim: '6, 7, 10', rimK: 0.7, rimW: fs => 2.4 },
+        desc: { size: fs => Math.max(10, fs * 0.8), font: s => `400 ${s}px ${DEFAULT_FONT}`,
+                rgb: '160, 200, 232', rim: '6, 7, 10', rimK: 0.75 },
+    },
+    hulls: {
+        dash: [7, 5], march: 0.02,      // marching ants (null dash = solid)
+        mega:    { rgb: '150, 205, 255', a: 0.6,  w: 1.4 },
+        cluster: { rgb: '150, 205, 255', a: 0.55, w: 1.2 },
+    },
+    init() {},
+    resize() {},
+    prepareNode() {},
+    drawBackground() { ctx.fillStyle = '#0b0d12'; ctx.fillRect(0, 0, width, height); },
+    drawUnderDots() {},
+    drawDot(point, sx, sy, radius, alpha, emphasis) {
+        if (radius > 2.2 && alpha > 0.2) {
             ctx.beginPath();
-            for (let i = 0; i < boundary.length; i++) {
-                const [bx, by] = toScreen(boundary[i][0], boundary[i][1]);
-                if (i === 0) ctx.moveTo(bx, by);
-                else ctx.lineTo(bx, by);
+            ctx.arc(sx, sy, radius * 2.1, 0, Math.PI * 2);
+            ctx.fillStyle = `rgba(126, 198, 245, ${alpha * (emphasis ? 0.22 : 0.1)})`;
+            ctx.fill();
+        }
+        ctx.beginPath();
+        ctx.arc(sx, sy, radius, 0, Math.PI * 2);
+        ctx.fillStyle = emphasis ? `rgba(255, 255, 255, ${alpha})` : `rgba(224, 239, 252, ${alpha})`;
+        ctx.fill();
+        if (emphasis) { ctx.strokeStyle = 'rgba(140, 214, 255, 0.9)'; ctx.lineWidth = 1.5; ctx.stroke(); }
+        return radius;
+    },
+    drawOverDots() {},
+    afterFrame() {},
+    onHover() {},
+};
+const T = (() => {
+    const own = (typeof THEME !== 'undefined' && THEME) || {};
+    const t = { ...DEFAULT_THEME, ...own };
+    t.labels = { ...DEFAULT_THEME.labels, ...(own.labels || {}) };
+    for (const k of Object.keys(DEFAULT_THEME.labels)) t.labels[k] = { ...DEFAULT_THEME.labels[k], ...((own.labels || {})[k] || {}) };
+    t.hulls = { ...DEFAULT_THEME.hulls, ...(own.hulls || {}) };
+    return t;
+})();
+
+function getRadius(point, zoom) {
+    // Mention count reads directly as dot size: 1 mention ≈ 1.6px,
+    // 600+ mentions ≈ 9px at rest zoom.
+    const base = Math.max(1.6, Math.min(9, Math.log2(point.mention_count + 1) * 1.6));
+    return base * Math.min(zoom, 3);
+}
+
+let data = null;
+let canvas, ctx;
+let width, height;
+let offsetX = 0, offsetY = 0;
+let targetOffsetX = 0, targetOffsetY = 0;
+const MIN_ZOOM = 1.2;  // also the initial / reset zoom
+const MAX_ZOOM = 50;
+const DESC_START = 16; // zoom where descriptions appear under company names
+const COMPANY_LABEL_START = 7.5;   // zoom where company names start appearing
+const CLUSTER_LABEL_FADE_IN = 1.0; // cluster names visible from rest zoom
+const REDUCED_MOTION = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+let zoom = MIN_ZOOM;
+let targetZoom = MIN_ZOOM;
+// Camera-smoothing rate (per second), frame-rate independent:
+// per-frame factor = 1 - exp(-rate * dt).
+const CAMERA_EASE_RATE = 1.2;
+let lastFrameTime = 0;
+let dragging = false;
+let dragStartX, dragStartY;
+let searchTerm = '';
+let activeTag = null;       // a tag picked from the search suggestions: highlight its companies
+let tagCounts = {};         // {tag: companies on the map carrying it}
+let suggestIdx = -1;
+let hoveredPoint = null;
+let mentionThreshold = T.mentionDefault;
+let scoreThreshold = T.scoreDefault;
+let researchOnly = false;   // show only labs' research projects (point.research)
+let uiRects = [];           // screen boxes of the panel/zoom keys/footer: no map labels under them
+
+let minX, maxX, minY, maxY, rangeX, rangeY;
+
+let simulation = null;
+let nodes = [];
+
+// A company's description wrapped to a narrow column (max 3 lines), cached
+// per font size. ctx.font must already be set to the description font.
+function descLines(point, size) {
+    const key = Math.round(size * 2);
+    if (point._descKey === key) return point._desc;
+    const maxW = size * 19;
+    const words = String(point.description).split(/\s+/);
+    const lines = [];
+    let cur = '';
+    for (const w of words) {
+        const next = cur ? cur + ' ' + w : w;
+        if (ctx.measureText(next).width > maxW && cur) {
+            lines.push(cur);
+            cur = w;
+            if (lines.length === 3) break;
+        } else {
+            cur = next;
+        }
+    }
+    if (lines.length < 3 && cur) lines.push(cur);
+    else if (lines.length === 3 && cur) lines[2] = lines[2].replace(/[,.;:]?$/, '…');
+    point._descKey = key;
+    point._desc = lines;
+    return lines;
+}
+
+// Data-to-screen scale (pixels per data unit) at the current zoom.
+function viewScale() {
+    const margin = 60;
+    return Math.min((width - margin * 2) / rangeX, (height - margin * 2) / rangeY) * zoom;
+}
+
+// Region radius in data units (for themes that draw per-region effects).
+const regionExtent = new WeakMap();
+function extentOf(item) {
+    let r = regionExtent.get(item);
+    if (r == null) {
+        r = 0;
+        for (const [bx, by] of (item.boundary || []))
+            r = Math.max(r, Math.hypot(bx - item.center_x, by - item.center_y));
+        regionExtent.set(item, r);
+    }
+    return r;
+}
+
+function measureUI() {
+    uiRects = [];
+    for (const id of ['controls', 'zoom-controls', 'last-updated']) {
+        const el = document.getElementById(id);
+        if (!el || !el.offsetParent && getComputedStyle(el).position !== 'fixed') continue;
+        const r = el.getBoundingClientRect();
+        if (r.width && r.height) uiRects.push([r.left - 6, r.top - 6, r.right + 6, r.bottom + 6]);
+    }
+}
+const boxHits = (r, list) => list.some(o => r[0] < o[2] && r[2] > o[0] && r[1] < o[3] && r[3] > o[1]);
+
+function init() {
+    canvas = document.getElementById('canvas');
+    ctx = canvas.getContext('2d');
+    resize();
+    T.init();
+    T.resize();
+    window.addEventListener('resize', () => { resize(); T.resize(); });
+
+    canvas.addEventListener('mousedown', onMouseDown);
+    canvas.addEventListener('mousemove', onMouseMove);
+    canvas.addEventListener('mouseup', onMouseUp);
+    canvas.addEventListener('mouseleave', onMouseUp);
+    canvas.addEventListener('wheel', onWheel, { passive: false });
+
+    canvas.addEventListener('touchstart', onTouchStart, { passive: false });
+    canvas.addEventListener('touchmove', onTouchMove, { passive: false });
+    canvas.addEventListener('touchend', onTouchEnd);
+
+    document.getElementById('zoom-in').addEventListener('click', () => { targetZoom = Math.min(MAX_ZOOM, targetZoom * 1.3); });
+    document.getElementById('zoom-out').addEventListener('click', () => { targetZoom = Math.max(MIN_ZOOM, targetZoom / 1.3); });
+    document.getElementById('zoom-reset').addEventListener('click', () => { targetZoom = MIN_ZOOM; targetOffsetX = 0; targetOffsetY = 0; });
+    const box = document.getElementById('search');
+    box.addEventListener('input', (e) => { searchTerm = e.target.value.toLowerCase(); showSuggestions(); });
+    box.addEventListener('focus', showSuggestions);
+    box.addEventListener('blur', () => setTimeout(hideSuggestions, 120));
+    box.addEventListener('keydown', (e) => {
+        const items = [...document.querySelectorAll('#tag-suggest li[data-tag]')];
+        if (!items.length || document.getElementById('tag-suggest').hidden) return;
+        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+            e.preventDefault();
+            suggestIdx = (suggestIdx + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
+            items.forEach((li, i) => li.setAttribute('aria-selected', i === suggestIdx ? 'true' : 'false'));
+            items[suggestIdx].scrollIntoView({ block: 'nearest' });
+        } else if (e.key === 'Enter' && suggestIdx >= 0) {
+            e.preventDefault();
+            pickTag(items[suggestIdx].dataset.tag);
+        }
+    });
+    document.getElementById('tag-suggest').addEventListener('mousedown', (e) => {
+        const li = e.target.closest('li[data-tag]');
+        if (li) { e.preventDefault(); pickTag(li.dataset.tag); }
+    });
+    document.getElementById('tag-clear').addEventListener('click', () => setTag(null));
+    // Esc: close the suggestions, then clear the text, then the tag; wherever the focus is.
+    document.addEventListener('keydown', (e) => {
+        if (e.key !== 'Escape') return;
+        if (!document.getElementById('tag-suggest').hidden) { hideSuggestions(); return; }
+        if (box.value || searchTerm) { box.value = ''; searchTerm = ''; box.blur(); return; }
+        if (activeTag) setTag(null);
+    });
+    const mention = document.getElementById('mention-slider');
+    mention.value = mentionThreshold;
+    document.getElementById('mention-val').textContent = mentionThreshold;
+    mention.addEventListener('input', (e) => {
+        mentionThreshold = +e.target.value;
+        document.getElementById('mention-val').textContent = e.target.value;
+        updateFilterCount();
+    });
+    const score = document.getElementById('score-slider');
+    const scoreText = () => scoreThreshold > 0 ? scoreThreshold.toFixed(2) : 'off';
+    score.value = scoreThreshold;
+    document.getElementById('score-val').textContent = scoreText();
+    score.addEventListener('input', (e) => {
+        scoreThreshold = +e.target.value;
+        document.getElementById('score-val').textContent = scoreText();
+        updateFilterCount();
+    });
+    document.getElementById('research-only').addEventListener('change', (e) => {
+        researchOnly = e.target.checked;
+        updateFilterCount();
+    });
+
+    loadData();
+}
+
+async function loadData() {
+    const resp = await fetch('data.json');
+    data = await resp.json();
+
+    tagCounts = {};
+    for (const p of data.points) for (const t of p.tags || []) tagCounts[t] = (tagCounts[t] || 0) + 1;
+    // The research filter only appears once the map has research projects.
+    document.getElementById('research-filter').hidden = !data.points.some(p => p.research);
+    const credit = SITE.credit ? ` · created by ${SITE.credit}` : '';
+    if (data.generated_at) {
+        const d = new Date(data.generated_at);
+        const mm = String(d.getMonth() + 1).padStart(2, '0');
+        document.getElementById('last-updated').textContent =
+            `${MAP_VERSION}, data last updated ${mm}-${d.getFullYear()}${credit}`;
+    } else {
+        document.getElementById('last-updated').textContent = `${MAP_VERSION}${credit}`;
+    }
+
+    minX = Infinity; maxX = -Infinity;
+    minY = Infinity; maxY = -Infinity;
+    for (const p of data.points) {
+        minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x);
+        minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y);
+    }
+    rangeX = maxX - minX || 1;
+    rangeY = maxY - minY || 1;
+
+    // Nodes for the D3 drift simulation: each eases back to its map position.
+    nodes = data.points.map(p => {
+        const n = {
+            ...p,
+            targetX: p.x,
+            targetY: p.y,
+            x: p.x + (Math.random() - 0.5) * 0.1,
+            y: p.y + (Math.random() - 0.5) * 0.1,
+        };
+        T.prepareNode(n);
+        return n;
+    });
+
+    data.points = nodes;
+    updateFilterCount();
+    initSimulation();
+    startRenderLoop();
+}
+
+function initSimulation() {
+    const driftStrength = REDUCED_MOTION ? 0 : 0.00008;
+    for (const node of nodes) { node.targetX = node.x; node.targetY = node.y; }
+    simulation = d3.forceSimulation(nodes)
+        .force('targetX', d3.forceX(d => d.targetX).strength(0.08))
+        .force('targetY', d3.forceY(d => d.targetY).strength(0.08))
+        .alphaDecay(0)
+        .alphaTarget(0.005)
+        .velocityDecay(0.7)
+        .on('tick', () => {
+            for (const node of nodes) {
+                node.vx += (Math.random() - 0.5) * driftStrength;
+                node.vy += (Math.random() - 0.5) * driftStrength;
             }
-            ctx.closePath();
+        });
+}
+
+function startRenderLoop() {
+    function loop(time) {
+        render(time);
+        T.afterFrame(time);
+        requestAnimationFrame(loop);
+    }
+    requestAnimationFrame(loop);
+}
+
+function isPointVisible(point) {
+    if (point.mention_count < mentionThreshold) return false;
+    // Points without a score (old data.json builds) are exempt rather than hidden.
+    if (scoreThreshold > 0 && point.score != null && point.score < scoreThreshold) return false;
+    if (researchOnly && !point.research) return false;
+    return true;
+}
+
+// --- Tag search: suggestions match anywhere in a tag's name ---
+function tagLabel(t) { return t.replace(/_/g, ' ').toLowerCase(); }
+
+function hideSuggestions() {
+    const ul = document.getElementById('tag-suggest');
+    ul.hidden = true; suggestIdx = -1;
+    document.getElementById('search').setAttribute('aria-expanded', 'false');
+}
+
+function showSuggestions() {
+    const ul = document.getElementById('tag-suggest');
+    const q = searchTerm.trim();
+    if (!data || q.length < 2) { hideSuggestions(); return; }
+    const info = data.tag_info || {};
+    const hits = Object.keys(tagCounts)
+        .filter(t => tagLabel(t).includes(q))
+        .sort((a, b) => (tagLabel(a).startsWith(q) ? 0 : 1) - (tagLabel(b).startsWith(q) ? 0 : 1)
+                        || tagCounts[b] - tagCounts[a])
+        .slice(0, 8);
+    if (!hits.length) { hideSuggestions(); return; }
+    const esc = s => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    ul.innerHTML = '<li class="head" aria-hidden="true">Tags</li>' + hits.map(t => {
+        const label = tagLabel(t), i = label.indexOf(q);
+        const marked = esc(label.slice(0, i)) + '<mark>' + esc(label.slice(i, i + q.length)) + '</mark>' + esc(label.slice(i + q.length));
+        return `<li role="option" aria-selected="false" data-tag="${esc(t)}"><span class="t">${marked}</span>`
+             + `<span class="n">${tagCounts[t]}</span>`
+             + (info[t] ? `<span class="d">${esc(info[t])}</span>` : '') + '</li>';
+    }).join('');
+    suggestIdx = -1;
+    ul.hidden = false;
+    document.getElementById('search').setAttribute('aria-expanded', 'true');
+}
+
+function pickTag(t) {
+    const box = document.getElementById('search');
+    box.value = ''; searchTerm = '';
+    hideSuggestions();
+    setTag(t);
+}
+
+function setTag(t) {
+    activeTag = t;
+    const chip = document.getElementById('tag-chip');
+    if (t) {
+        chip.querySelector('.label').innerHTML =
+            `Tag: <b></b> · ${(tagCounts[t] || 0).toLocaleString()} companies`;
+        chip.querySelector('.label b').textContent = tagLabel(t);
+        chip.title = (data.tag_info || {})[t] || '';
+    }
+    chip.hidden = !t;
+}
+
+function updateFilterCount() {
+    if (!data) return;
+    const shown = data.points.filter(isPointVisible).length;
+    document.getElementById('filter-count').textContent =
+        shown === data.points.length
+            ? `${data.points.length.toLocaleString()} entities`
+            : `${shown.toLocaleString()} of ${data.points.length.toLocaleString()} entities`;
+}
+
+function resize() {
+    width = window.innerWidth;
+    height = window.innerHeight;
+    canvas.width = width * devicePixelRatio;
+    canvas.height = height * devicePixelRatio;
+    canvas.style.width = width + 'px';
+    canvas.style.height = height + 'px';
+    ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+}
+
+function toScreen(px, py) {
+    const margin = 60;
+    const scale = Math.min((width - margin * 2) / rangeX, (height - margin * 2) / rangeY);
+    const cx = width / 2, cy = height / 2;
+    const mx = (minX + maxX) / 2, my = (minY + maxY) / 2;
+    return [cx + (px - mx) * scale * zoom + offsetX, cy + (py - my) * scale * zoom + offsetY];
+}
+
+function fromScreen(sx, sy) {
+    const margin = 60;
+    const scale = Math.min((width - margin * 2) / rangeX, (height - margin * 2) / rangeY);
+    const cx = width / 2, cy = height / 2;
+    const mx = (minX + maxX) / 2, my = (minY + maxY) / 2;
+    return [(sx - cx - offsetX) / (scale * zoom) + mx, (sy - cy - offsetY) / (scale * zoom) + my];
+}
+
+// --- Word-wrap a region/cluster name into lines targeting a squarish shape ---
+function wrapClusterName(name, fontSize, font) {
+    ctx.font = font;
+    const words = name.split(' ');
+    if (words.length <= 2) return [name];
+    let bestLines = [name];
+    let bestRatio = Infinity;
+    for (let nLines = 2; nLines <= Math.min(3, words.length); nLines++) {
+        const lines = [];
+        const wordsPerLine = Math.ceil(words.length / nLines);
+        for (let i = 0; i < words.length; i += wordsPerLine) lines.push(words.slice(i, i + wordsPerLine).join(' '));
+        const maxW = Math.max(...lines.map(l => ctx.measureText(l).width));
+        const ratio = Math.abs(Math.log(maxW / (lines.length * fontSize * 1.3)));
+        if (ratio < bestRatio) { bestRatio = ratio; bestLines = lines; }
+    }
+    return bestLines;
+}
+
+// --- Nudged label positions that avoid each other and the panel ---
+// Works for any list of {name, center_x, center_y}; checkMembers hides
+// cluster labels whose members are all filtered out.
+function computeLabelPositions(items, fontSize, checkMembers, font) {
+    ctx.font = font;
+    const lineHeight = fontSize * 1.3;
+    const labels = [];
+    for (const cluster of items) {
+        if (checkMembers && !data.points.some(p => p.cluster_id === cluster.id && isPointVisible(p))) continue;
+        const [sx, sy] = toScreen(cluster.center_x, cluster.center_y);
+        if (sx < -400 || sx > width + 400 || sy < -400 || sy > height + 400) continue;
+        const lines = wrapClusterName(cluster.name, fontSize, font);
+        const maxW = Math.max(...lines.map(l => ctx.measureText(l).width));
+        labels.push({ cluster, lines, x: sx, y: sy, hw: maxW / 2 + 6, hh: lines.length * lineHeight / 2 + 4, lineHeight });
+    }
+    // Iterative relaxation: push overlapping labels apart.
+    for (let iter = 0; iter < 8; iter++) {
+        for (let i = 0; i < labels.length; i++) {
+            for (let j = i + 1; j < labels.length; j++) {
+                const a = labels[i], b = labels[j];
+                const ox = (a.hw + b.hw) - Math.abs(a.x - b.x);
+                const oy = (a.hh + b.hh) - Math.abs(a.y - b.y);
+                if (ox > 0 && oy > 0) {
+                    if (oy < ox) {
+                        const push = oy * 0.52;
+                        if (a.y < b.y) { a.y -= push; b.y += push; } else { a.y += push; b.y -= push; }
+                    } else {
+                        const push = ox * 0.52;
+                        if (a.x < b.x) { a.x -= push; b.x += push; } else { a.x += push; b.x -= push; }
+                    }
+                }
+            }
+        }
+    }
+    // Never under the panel: slide a label just clear of it (right or below,
+    // whichever is the shorter move); one that would have to travel more
+    // than its own size is dropped instead of misplaced.
+    const box = l => [l.x - l.hw, l.y - l.hh, l.x + l.hw, l.y + l.hh];
+    return labels.filter(l => {
+        const hit = uiRects.find(u => boxHits(box(l), [u]));
+        if (!hit) return true;
+        const moves = [
+            { x: hit[2] + l.hw, y: l.y },
+            { x: l.x, y: hit[3] + l.hh },
+            { x: hit[0] - l.hw, y: l.y },
+            { x: l.x, y: hit[1] - l.hh },
+        ].map(m => ({ ...m, d: Math.hypot(m.x - l.x, m.y - l.y) }))
+         .filter(m => m.d <= Math.max(l.hw, l.hh) * 2 && m.x - l.hw > 0 && m.y - l.hh > 0
+                      && !boxHits([m.x - l.hw, m.y - l.hh, m.x + l.hw, m.y + l.hh], uiRects))
+         .sort((a, b) => a.d - b.d);
+        if (!moves.length) return false;
+        l.x = moves[0].x; l.y = moves[0].y;
+        return true;
+    });
+}
+
+// --- Multi-line centred text over a soft dark aura: three widening halo
+// passes at falling alpha, so the glyphs dim whatever is under them.
+const HALO_PASSES = [[2.6, 0.22], [1.7, 0.45], [1.0, 1.0]];
+function drawClusterLabel(lbl, color, haloRGB, haloAlpha, haloWidth, drop) {
+    const startY = lbl.y - (lbl.lines.length - 1) * lbl.lineHeight / 2;
+    ctx.lineJoin = 'round';
+    for (let i = 0; i < lbl.lines.length; i++) {
+        const ly = startY + i * lbl.lineHeight;
+        if (haloRGB) {
+            for (const [wScale, aScale] of HALO_PASSES) {
+                ctx.strokeStyle = `rgba(${haloRGB}, ${haloAlpha * aScale})`;
+                ctx.lineWidth = haloWidth * wScale;
+                ctx.strokeText(lbl.lines[i], lbl.x, ly);
+            }
+        }
+        if (drop) {     // offset second colour behind the letters
+            const d = Math.max(1.5, haloWidth * 0.55);
+            ctx.fillStyle = drop;
+            ctx.fillText(lbl.lines[i], lbl.x + d, ly + d);
+        }
+        ctx.fillStyle = color;
+        ctx.fillText(lbl.lines[i], lbl.x, ly);
+    }
+}
+
+function strokeHull(boundary) {
+    if (!boundary || boundary.length < 3) return;
+    ctx.beginPath();
+    for (let i = 0; i < boundary.length; i++) {
+        const [bx, by] = toScreen(boundary[i][0], boundary[i][1]);
+        if (i === 0) ctx.moveTo(bx, by); else ctx.lineTo(bx, by);
+    }
+    ctx.closePath();
+    ctx.stroke();
+}
+
+function render(time = 0) {
+    // Ease the camera toward its targets (delta-time aware).
+    const dt = lastFrameTime ? Math.min((time - lastFrameTime) / 1000, 0.1) : 1 / 60;
+    lastFrameTime = time;
+    const ease = 1 - Math.exp(-CAMERA_EASE_RATE * dt);
+    zoom    += (targetZoom    - zoom)    * ease;
+    offsetX += (targetOffsetX - offsetX) * ease;
+    offsetY += (targetOffsetY - offsetY) * ease;
+
+    T.drawBackground(time);
+    if (!data) return;
+    measureUI();
+    const L = T.labels;
+
+    // Semantic zoom: mega-regions at rest crossfade into clusters, which
+    // later fade to a dim background layer as company names come in.
+    const bgPhase = zoom > COMPANY_LABEL_START ? Math.min(1, (zoom - COMPANY_LABEL_START) / 3.0) : 0;
+    const clusterPhase = Math.min(1, Math.max(0, (zoom - 1.9) / 1.3));
+    const megaAlpha = 1 - clusterPhase;
+    const megas = data.megaclusters || [];
+
+    // --- Cluster labels: background layer (large, dim: deep-zoom wayfinding) ---
+    if (zoom > CLUSTER_LABEL_FADE_IN && bgPhase > 0) {
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        const bgAlpha = 0.2 * (1 - bgPhase * 0.4) * L.clusterBg.k;
+        const fontSize = Math.min(80, 18 * Math.sqrt(zoom / 2));
+        const font = L.clusterBg.font(fontSize);
+        const labels = computeLabelPositions(data.clusters, fontSize, true, font);
+        ctx.font = font;
+        for (const lbl of labels) drawClusterLabel(lbl, `rgba(${L.clusterBg.rgb}, ${bgAlpha})`);
+    }
+
+    T.drawUnderDots(time, { bg: bgPhase, cluster: clusterPhase, mega: megaAlpha });
+
+    // --- Entity nodes ---
+    const nameRects = [], descQueue = [];
+    const isSearchActive = searchTerm.length > 0 || activeTag !== null;
+    const companyAlpha = zoom > COMPANY_LABEL_START ? Math.min(0.85, (zoom - COMPANY_LABEL_START) * 0.18) : 0;
+    for (const point of data.points) {
+        if (!isPointVisible(point)) continue;
+        const [sx, sy] = toScreen(point.x, point.y);
+        if (sx < -80 || sx > width + 80 || sy < -80 || sy > height + 80) continue;
+
+        const isSearchMatch = isSearchActive
+            && (!activeTag || (point.tags || []).includes(activeTag))
+            && (!searchTerm || point.name.toLowerCase().includes(searchTerm)
+                || (!activeTag && (point.tags || []).some(t => tagLabel(t).includes(searchTerm))));
+        const isHovered = hoveredPoint === point;
+
+        let radius = getRadius(point, zoom);
+        let alpha = T.dotAlpha;
+        let emphasis = false;
+        if (isSearchActive && !isSearchMatch) alpha = 0.06;
+        if (isSearchMatch) { radius *= 1.5; alpha = 1; emphasis = true; }
+        if (isHovered) { radius *= 1.4; alpha = 1; emphasis = true; }
+
+        radius = T.drawDot(point, sx, sy, radius, alpha, emphasis, time) || radius;
+
+        // A lab's research project (not a product line): an open ring around the dot.
+        if (point.research && alpha > 0.2) {
+            ctx.beginPath();
+            ctx.arc(sx, sy, radius + 2.5, 0, Math.PI * 2);
+            ctx.strokeStyle = `rgba(${T.researchRGB}, ${Math.min(1, alpha + 0.25)})`;
+            ctx.lineWidth = 1.4;
             ctx.stroke();
         }
 
-        // --- Boundaries: marching-ants dashed hulls (over the dots).
-        // Constant screen-space dash + steady drift keeps them visually
-        // separate from the static circuit art behind them.
-        ctx.setLineDash([7, 5]);
-        ctx.lineDashOffset = -(time * 0.02) % 12;
-        if (megaAlpha > 0.02 && megas.length) {
-            ctx.strokeStyle = `rgba(150, 205, 255, ${0.6 * megaAlpha})`;
-            ctx.lineWidth = 1.4;
-            for (const m of megas) strokeHull(m.boundary);
-        }
-        if (clusterPhase > 0.02) {
-            ctx.strokeStyle = `rgba(150, 205, 255, ${0.55 * clusterPhase})`;
-            ctx.lineWidth = 1.2;
-            for (const cluster of data.clusters) strokeHull(cluster.boundary);
-        }
-        ctx.setLineDash([]);
+        // Company names drift in while the cluster names fade back.
+        const shouldLabel = (companyAlpha > 0 && point.mention_count >= 2) ||
+                            (zoom > 5 && point.mention_count >= 1) ||
+                            isSearchMatch || isHovered;
+        if (shouldLabel && alpha > 0.2) {
+            const fs = L.name.size(zoom);
+            ctx.font = L.name.font(fs);
+            const lx = sx + radius + 4;
+            const rect = [lx - 2, sy - fs * 0.6, lx + ctx.measureText(point.name).width + 2, sy + fs * 0.6, point];
+            if (!isHovered && boxHits(rect, uiRects)) continue;     // under the panel
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'middle';
+            const la = isHovered || isSearchMatch ? 0.95 : companyAlpha;
+            // A dark rim so the name survives passing over a neighbouring dot.
+            ctx.lineJoin = 'round';
+            ctx.lineWidth = L.name.rimW(fs);
+            ctx.strokeStyle = `rgba(${L.name.rim}, ${la * L.name.rimK})`;
+            ctx.strokeText(point.name, lx, sy);
+            ctx.globalAlpha = la;
+            ctx.fillStyle = L.name.fill;
+            ctx.fillText(point.name, lx, sy);
+            ctx.globalAlpha = 1;
 
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
+            // Deepest zoom: queue the description; drawn once every name is placed.
+            nameRects.push(rect);
+            const da = zoom > DESC_START ? Math.min(1, (zoom - DESC_START) / 4) * la : 0;
+            if (da > 0.05 && point.description && sx > -300 && sx < width && sy > -60 && sy < height + 20) {
+                descQueue.push({ point, lx, sy, fs, da, first: isHovered || isSearchMatch });
+            }
+        }
+    }
 
-        // --- Mega-region labels: the zoomed-out generation ---
-        if (megaAlpha > 0.01 && megas.length) {
-            const fontSize = Math.min(34, 21 * Math.sqrt(zoom / 1.2));
-            const labels = computeLabelPositions(megas, fontSize, false);
-            ctx.font = `700 ${fontSize}px "Baumans", -apple-system, BlinkMacSystemFont, sans-serif`;
-            const a = 0.95 * megaAlpha;
-            const haloW = Math.max(2.2, fontSize * 0.13);
+    // Descriptions under names (deepest zoom): hovered/searched first, then the
+    // most-covered companies. One blocked below its name (by a name, a drawn
+    // description or the panel) goes above it instead; blocked both ways, it
+    // is left out (hover still shows it).
+    if (descQueue.length) {
+        descQueue.sort((a, b) => (b.first - a.first) || (b.point.mention_count - a.point.mention_count));
+        const placed = [];
+        const hits = (r, list, self) => list.some(o => o[4] !== self && r[0] < o[2] && r[2] > o[0] && r[1] < o[3] && r[3] > o[1]);
+        for (const q of descQueue) {
+            const dfs = L.desc.size(q.fs);
+            ctx.font = L.desc.font(dfs);
+            const lines = descLines(q.point, dfs);
+            const w = Math.max(...lines.map(l => ctx.measureText(l).width));
+            const h = lines.length * dfs * 1.22 + 2;
+            const below = q.sy + q.fs * 0.62, above = q.sy - q.fs * 0.62 - h;
+            const rectAt = t => [q.lx - 2, t, q.lx + w + 2, t + h, q.point];
+            const free = r => !boxHits(r, uiRects) && (q.first || (!hits(r, nameRects, q.point) && !hits(r, placed, null)));
+            let top;
+            if (free(rectAt(below))) top = below;
+            else if (free(rectAt(above))) top = above;
+            else continue;
+            placed.push(rectAt(top));
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'middle';
+            ctx.lineJoin = 'round';
+            ctx.lineWidth = Math.max(2.2, dfs * 0.22);
+            ctx.strokeStyle = `rgba(${L.desc.rim}, ${q.da * L.desc.rimK})`;
+            ctx.fillStyle = `rgba(${L.desc.rgb}, ${q.da})`;
+            let ly = top + dfs * 0.75;
+            for (const line of lines) {
+                ctx.strokeText(line, q.lx, ly);
+                ctx.fillText(line, q.lx, ly);
+                ly += dfs * 1.22;
+            }
+        }
+    }
+
+    T.drawOverDots(time);
+
+    // --- Region / cluster boundaries (over the dots) ---
+    const H = T.hulls;
+    ctx.lineJoin = 'round';
+    if (H.dash) { ctx.setLineDash(H.dash); ctx.lineDashOffset = -(time * (H.march || 0)) % (H.dash[0] + H.dash[1]); }
+    if (megaAlpha > 0.02 && megas.length) {
+        ctx.strokeStyle = `rgba(${H.mega.rgb}, ${H.mega.a * megaAlpha})`;
+        ctx.lineWidth = H.mega.w;
+        for (const m of megas) strokeHull(m.boundary);
+    }
+    if (clusterPhase > 0.02) {
+        ctx.strokeStyle = `rgba(${H.cluster.rgb}, ${H.cluster.a * clusterPhase})`;
+        ctx.lineWidth = H.cluster.w;
+        for (const cluster of data.clusters) strokeHull(cluster.boundary);
+    }
+    ctx.setLineDash([]);
+
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    // --- Mega-region labels: the zoomed-out generation ---
+    if (megaAlpha > 0.01 && megas.length) {
+        const fontSize = Math.min(34, 21 * Math.sqrt(zoom / 1.2));
+        const font = L.mega.font(fontSize);
+        const labels = computeLabelPositions(megas, fontSize, false, font);
+        ctx.font = font;
+        const a = 0.95 * megaAlpha * L.mega.k;
+        const haloW = Math.max(2.2, fontSize * 0.13);
+        for (const lbl of labels) {
+            drawClusterLabel(lbl, `rgba(${L.mega.rgb}, ${a})`, L.mega.halo, a * L.mega.haloK, haloW,
+                             L.mega.drop ? `rgba(${L.mega.drop}, ${a})` : null);
+        }
+    }
+
+    // --- Cluster labels: foreground layer, on top of the dots ---
+    if (clusterPhase > 0.01) {
+        const fgAlpha = Math.max(0, clusterPhase * (1 - bgPhase) * 0.85) * L.cluster.k;
+        if (fgAlpha > 0.01) {
+            // Small when many labels are visible, growing as fewer are on screen.
+            const fontSize = Math.max(9, Math.min(28, 13 * Math.sqrt(zoom / 2)));
+            const font = L.cluster.font(fontSize);
+            const labels = computeLabelPositions(data.clusters, fontSize, true, font);
+            ctx.font = font;
+            const haloW = Math.max(1.8, fontSize * 0.13);
             for (const lbl of labels) {
-                drawClusterLabel(lbl, `rgba(255, 197, 92, ${a})`,
-                                 '6, 7, 10', a * 0.8, haloW);
-            }
-        }
-
-        // --- Cluster labels: foreground layer, on top of the dots ---
-        if (clusterPhase > 0.01) {
-            const fgAlpha = Math.max(0, clusterPhase * (1 - bgPhase) * 0.85);
-
-            if (fgAlpha > 0.01) {
-                // Small when many labels are visible, growing as zoom brings
-                // fewer clusters on screen.
-                const fontSize = Math.max(9, Math.min(28, 13 * Math.sqrt(zoom / 2)));
-                const labels = computeLabelPositions(data.clusters, fontSize, true);
-                ctx.font = `700 ${fontSize}px "Baumans", -apple-system, BlinkMacSystemFont, sans-serif`;
-
-                const haloW = Math.max(1.8, fontSize * 0.13);
-                for (const lbl of labels) {
-                    // Amber fill over a soft dark aura: bright against the
-                    // board, and the aura punches a hole in the dot field.
-                    drawClusterLabel(lbl, `rgba(255, 197, 92, ${fgAlpha})`,
-                                     '6, 7, 10', fgAlpha * 0.8, haloW);
-                }
+                drawClusterLabel(lbl, `rgba(${L.cluster.rgb}, ${fgAlpha})`, L.cluster.halo, fgAlpha * L.cluster.haloK, haloW);
             }
         }
     }
+}
 
-    function findPointAt(mx, my) {
-        if (!data) return null;
-        let closest = null, closestDist = Infinity;
-        for (const point of data.points) {
-            if (!isPointVisible(point)) continue;
-            const [sx, sy] = toScreen(point.x, point.y);
-            const r = getRadius(point, zoom);
-            const dist = Math.sqrt((mx - sx) ** 2 + (my - sy) ** 2);
-            if (dist < r + 4 && dist < closestDist) {
-                closest = point;
-                closestDist = dist;
-            }
-        }
-        return closest;
+function findPointAt(mx, my) {
+    if (!data) return null;
+    let closest = null, closestDist = Infinity;
+    for (const point of data.points) {
+        if (!isPointVisible(point)) continue;
+        const [sx, sy] = toScreen(point.x, point.y);
+        const r = getRadius(point, zoom);
+        const dist = Math.hypot(mx - sx, my - sy);
+        if (dist < r + 4 && dist < closestDist) { closest = point; closestDist = dist; }
     }
+    return closest;
+}
 
-    function showTooltip(point, mx, my) {
-        const tooltip = document.getElementById('tooltip');
-        tooltip.querySelector('.name').textContent = point.name;
-        let meta = `${point.category || ''}`;
-        if (point.type) meta += ` \u00b7 ${point.type}`;
-        if (point.location) meta += ` \u00b7 ${point.location}`;
-        meta += ` \u00b7 ${point.mention_count} mention${point.mention_count !== 1 ? 's' : ''}`;
-        if (point.score != null) meta += ` \u00b7 relevance ${point.score.toFixed(2)}`;
-        tooltip.querySelector('.meta').textContent = meta;
-        const tags = point.tags || [];
-        tooltip.querySelector('.tags').textContent = tags.length ? tags.join(', ') : '';
-        tooltip.querySelector('.desc').textContent = point.description || '';
+function showTooltip(point, mx, my) {
+    const tooltip = document.getElementById('tooltip');
+    tooltip.querySelector('.name').textContent = point.name;
+    let meta = point.research ? `Research project · ${point.category || ''}` : `${point.category || ''}`;
+    if (point.type) meta += ` · ${point.type}`;
+    if (point.location) meta += ` · ${point.location}`;
+    meta += ` · ${point.mention_count} mention${point.mention_count !== 1 ? 's' : ''}`;
+    if (point.score != null) meta += ` · relevance ${point.score.toFixed(2)}`;
+    tooltip.querySelector('.meta').textContent = meta;
+    const tags = point.tags || [];
+    tooltip.querySelector('.tags').textContent = tags.length ? tags.map(t => t.replace(/_/g, ' ')).join(', ') : '';
+    tooltip.querySelector('.desc').textContent = point.description || '';
 
-        let tx = mx + 16, ty = my - 10;
-        if (tx + 360 > width) tx = mx - 370;
-        if (ty + 150 > height) ty = height - 160;
-        if (ty < 10) ty = 10;
-        tooltip.style.left = tx + 'px';
-        tooltip.style.top = ty + 'px';
-        tooltip.style.display = 'block';
+    let tx = mx + 16, ty = my - 10;
+    if (tx + 360 > width) tx = mx - 370;
+    if (ty + 150 > height) ty = height - 160;
+    if (ty < 10) ty = 10;
+    tooltip.style.left = tx + 'px';
+    tooltip.style.top = ty + 'px';
+    tooltip.style.display = 'block';
+}
+
+function hideTooltip() { document.getElementById('tooltip').style.display = 'none'; }
+
+// --- Deep-hover panel: bullets + connector line ---
+const DEEP_HOVER_DELAY = 2500; // ms
+let deepHoverTimer = null;
+let deepHoverPoint = null;
+const bulletsCache = new Map(); // name -> { title, bullets[] }
+
+function fetchBullets(point) {
+    if (bulletsCache.has(point.name)) return bulletsCache.get(point.name);
+    // Embedded on each point in data.json at build time (fully static site).
+    // Labelled lines ("Used in: cars") when the map has them; the bare
+    // embedding lines read like sub-points of each other.
+    const raw = (point.bullets_display || point.bullets || '').split('\n').filter(Boolean);
+    const bullets = raw.map(line => line.replace(/^\s*\d+\.\s*/, '').trim()).filter(Boolean);
+    if (!bullets.length) return null;
+    // Profile attributes (type, scale, geography, partners...): shown, never embedded.
+    (point.profile || '').split('\n').map(s => s.trim()).filter(Boolean).forEach(s => bullets.push(s));
+    const entry = { title: point.name, bullets };
+    bulletsCache.set(point.name, entry);
+    return entry;
+}
+
+function scheduleDeepHover(point) {
+    cancelDeepHover();
+    deepHoverTimer = setTimeout(() => { triggerDeepHover(point); }, DEEP_HOVER_DELAY);
+}
+
+function cancelDeepHover() {
+    if (deepHoverTimer) { clearTimeout(deepHoverTimer); deepHoverTimer = null; }
+}
+
+function triggerDeepHover(point) {
+    if (hoveredPoint !== point) return;
+    const entry = fetchBullets(point);
+    if (!entry || hoveredPoint !== point) return;
+    deepHoverPoint = point;
+    showDeepPanel(entry);
+}
+
+let typewriterToken = 0;  // incremented on each show to cancel prior typer
+
+function showDeepPanel(entry) {
+    const panel = document.getElementById('deep-panel');
+    panel.querySelector('.title').textContent = entry.title;
+    const ul = panel.querySelector('ul');
+    ul.innerHTML = '';
+    const token = ++typewriterToken;
+    runTypewriter(ul, panel, entry.bullets, token);
+
+    const tRect = document.getElementById('tooltip').getBoundingClientRect();
+    // The side of the viewport with more room.
+    const roomRight = width - tRect.right, roomLeft = tRect.left;
+    const panelW = 420, gap = 60;
+    let panelLeft, anchor;
+    if (roomRight >= roomLeft) {
+        panelLeft = Math.min(width - panelW - 16, tRect.right + gap);
+        anchor = { x: tRect.right, y: tRect.top + tRect.height / 2, side: 'right' };
+    } else {
+        panelLeft = Math.max(16, tRect.left - panelW - gap);
+        anchor = { x: tRect.left, y: tRect.top + tRect.height / 2, side: 'left' };
     }
-
-    function hideTooltip() {
-        document.getElementById('tooltip').style.display = 'none';
-    }
-
-    // --- Deep-hover panel: bullets + connector line ---
-    const DEEP_HOVER_DELAY = 2500; // ms
-    let deepHoverTimer = null;
-    let deepHoverPoint = null;
-    const bulletsCache = new Map(); // name -> { title, bullets[] }
-
-    async function fetchBullets(point) {
-        if (bulletsCache.has(point.name)) return bulletsCache.get(point.name);
-        // Bullets are embedded on each point in data.json at build time —
-        // no network call needed. This makes the viz fully static for
-        // Vercel deployment.
-        const raw = (point.bullets || '').split('\n').filter(Boolean);
-        const bullets = raw.map(line => line.replace(/^\s*\d+\.\s*/, '').trim()).filter(Boolean);
-        if (!bullets.length) return null;
-        // Hover-panel attributes (type, scale, geography, partners...): shown, never embedded.
-        (point.profile || '').split('\n').map(s => s.trim()).filter(Boolean).forEach(s => bullets.push(s));
-        const entry = { title: point.name, bullets };
-        bulletsCache.set(point.name, entry);
-        return entry;
-    }
-
-    function scheduleDeepHover(point) {
-        cancelDeepHover();
-        deepHoverTimer = setTimeout(() => { triggerDeepHover(point); }, DEEP_HOVER_DELAY);
-    }
-
-    function cancelDeepHover() {
-        if (deepHoverTimer) { clearTimeout(deepHoverTimer); deepHoverTimer = null; }
-    }
-
-    async function triggerDeepHover(point) {
-        if (hoveredPoint !== point) return;
-        const data = await fetchBullets(point);
-        if (!data || hoveredPoint !== point) return;
-        deepHoverPoint = point;
-        showDeepPanel(data);
-    }
-
-    let typewriterToken = 0;  // incremented on each show to cancel prior typer
-
-    function showDeepPanel(data) {
-        const panel = document.getElementById('deep-panel');
-        panel.querySelector('.title').textContent = data.title;
-        const ul = panel.querySelector('ul');
-        ul.innerHTML = '';
-
-        // Kick off typewriter — cancellable via token.
-        const token = ++typewriterToken;
-        runTypewriter(ul, panel, data.bullets, token);
-
-        const tooltip = document.getElementById('tooltip');
-        const tRect = tooltip.getBoundingClientRect();
-
-        // Choose the side of the viewport with more room.
-        const roomRight = width - tRect.right;
-        const roomLeft  = tRect.left;
-        const panelW = 420;
-        const gap = 60;
-
-        let panelLeft, panelTop;
-        let anchor;  // which edge of the tooltip we leave from
-        if (roomRight >= roomLeft) {
-            panelLeft = Math.min(width - panelW - 16, tRect.right + gap);
-            anchor = { x: tRect.right, y: tRect.top + tRect.height / 2, side: 'right' };
-        } else {
-            panelLeft = Math.max(16, tRect.left - panelW - gap);
-            anchor = { x: tRect.left, y: tRect.top + tRect.height / 2, side: 'left' };
-        }
-        // Use ~95% of vertical real estate: pin top at 2.5vh so max-height: 95vh
-        // leaves matching 2.5vh gap at the bottom.
-        panelTop = Math.round(height * 0.025);
-
-        panel.style.left = panelLeft + 'px';
-        panel.style.top = panelTop + 'px';
-        panel.style.display = 'block';
-        // Next frame: fade in + animate line
-        requestAnimationFrame(() => {
-            panel.classList.add('visible');
-            const pRect = panel.getBoundingClientRect();
-            const pAnchor = { x: anchor.side === 'right' ? pRect.left : pRect.right,
-                              y: pRect.top + pRect.height / 2 };
-            const line = document.getElementById('connector-line');
-            line.setAttribute('x1', anchor.x);
-            line.setAttribute('y1', anchor.y);
-            line.setAttribute('x2', pAnchor.x);
-            line.setAttribute('y2', pAnchor.y);
-            const len = Math.hypot(pAnchor.x - anchor.x, pAnchor.y - anchor.y);
-            line.setAttribute('stroke-dasharray', len);
-            line.setAttribute('stroke-dashoffset', len);
-            // Force reflow then animate
-            line.getBoundingClientRect();
-            line.style.transition = 'stroke-dashoffset 450ms ease-out';
-            line.setAttribute('stroke-dashoffset', 0);
-        });
-    }
-
-    function hideDeepPanel() {
-        typewriterToken++;  // invalidate any in-flight typing
-        deepHoverPoint = null;
-        const panel = document.getElementById('deep-panel');
-        panel.classList.remove('visible');
-        panel.style.display = 'none';
+    panel.style.left = panelLeft + 'px';
+    panel.style.top = Math.round(height * 0.025) + 'px';   // max-height 95vh: even gaps
+    panel.style.display = 'block';
+    requestAnimationFrame(() => {
+        panel.classList.add('visible');
+        const pRect = panel.getBoundingClientRect();
+        const pAnchor = { x: anchor.side === 'right' ? pRect.left : pRect.right, y: pRect.top + pRect.height / 2 };
         const line = document.getElementById('connector-line');
-        line.style.transition = 'none';
-        line.setAttribute('stroke-dashoffset', line.getAttribute('stroke-dasharray'));
-    }
+        line.setAttribute('x1', anchor.x);
+        line.setAttribute('y1', anchor.y);
+        line.setAttribute('x2', pAnchor.x);
+        line.setAttribute('y2', pAnchor.y);
+        const len = Math.hypot(pAnchor.x - anchor.x, pAnchor.y - anchor.y);
+        line.setAttribute('stroke-dasharray', len);
+        line.setAttribute('stroke-dashoffset', len);
+        line.getBoundingClientRect();   // reflow, then animate
+        line.style.transition = 'stroke-dashoffset 450ms ease-out';
+        line.setAttribute('stroke-dashoffset', 0);
+    });
+}
 
-    // Old-school-modem typewriter: emit one char at a time across all bullets,
-    // scrolling the panel to keep the live cursor in view.
-    async function runTypewriter(ul, panel, bullets, token) {
-        const CHAR_MS = 6;            // ~165 cps — brisk but still typed
-        const PAUSE_BETWEEN = 80;     // ms pause between bullets
-        const END_PAUSE = 250;        // longer pause before the END. line
-        // Live cursor element — moves from line to line as we type
-        const cursor = document.createElement('span');
-        cursor.className = 'cursor';
-        cursor.innerHTML = '&nbsp;';
+function hideDeepPanel() {
+    typewriterToken++;  // invalidate any in-flight typing
+    deepHoverPoint = null;
+    const panel = document.getElementById('deep-panel');
+    panel.classList.remove('visible');
+    panel.style.display = 'none';
+    const line = document.getElementById('connector-line');
+    line.style.transition = 'none';
+    line.setAttribute('stroke-dashoffset', line.getAttribute('stroke-dasharray'));
+}
 
-        const lines = [...bullets, 'END.'];
-        for (let idx = 0; idx < lines.length; idx++) {
+// Typewriter: one char at a time across all bullets, keeping the cursor in view.
+async function runTypewriter(ul, panel, bullets, token) {
+    const CHAR_MS = 6, PAUSE_BETWEEN = 80, END_PAUSE = 250;
+    const cursor = document.createElement('span');
+    cursor.className = 'cursor';
+    cursor.innerHTML = '&nbsp;';
+    const lines = [...bullets, 'END.'];
+    for (let idx = 0; idx < lines.length; idx++) {
+        if (token !== typewriterToken) return;
+        const b = lines[idx];
+        const li = document.createElement('li');
+        ul.appendChild(li);
+        li.appendChild(cursor);
+        for (let i = 0; i < b.length; i++) {
             if (token !== typewriterToken) return;
-            const b = lines[idx];
-            const li = document.createElement('li');
-            ul.appendChild(li);
-            li.appendChild(cursor);
-            for (let i = 0; i < b.length; i++) {
-                if (token !== typewriterToken) return;
-                cursor.insertAdjacentText('beforebegin', b[i]);
-                panel.scrollTop = panel.scrollHeight;
-                await new Promise(r => setTimeout(r, CHAR_MS));
-            }
-            // Longer dramatic pause before the final END. line
-            const pause = (idx === lines.length - 2) ? END_PAUSE : PAUSE_BETWEEN;
-            await new Promise(r => setTimeout(r, pause));
+            cursor.insertAdjacentText('beforebegin', b[i]);
+            panel.scrollTop = panel.scrollHeight;
+            await new Promise(r => setTimeout(r, CHAR_MS));
         }
-        if (token === typewriterToken) cursor.remove();
+        await new Promise(r => setTimeout(r, idx === lines.length - 2 ? END_PAUSE : PAUSE_BETWEEN));
     }
+    if (token === typewriterToken) cursor.remove();
+}
 
-    // --- Event handlers ---
-    function onMouseDown(e) {
+// --- Event handlers ---
+function onMouseDown(e) { dragging = true; dragStartX = e.clientX; dragStartY = e.clientY; }
+
+function onMouseMove(e) {
+    if (dragging) {
+        const dx = e.clientX - dragStartX, dy = e.clientY - dragStartY;
+        // Drag tracks the cursor instantly.
+        offsetX += dx; offsetY += dy;
+        targetOffsetX += dx; targetOffsetY += dy;
+        dragStartX = e.clientX; dragStartY = e.clientY;
+        hideTooltip(); cancelDeepHover(); hideDeepPanel();
+        return;
+    }
+    const point = findPointAt(e.clientX, e.clientY);
+    if (point !== hoveredPoint) {
+        hoveredPoint = point;
+        T.onHover(point);
+        cancelDeepHover();
+        if (deepHoverPoint && deepHoverPoint !== point) hideDeepPanel();
+        if (point) scheduleDeepHover(point);
+    }
+    if (point) {
+        showTooltip(point, e.clientX, e.clientY);
+        canvas.style.cursor = 'pointer';
+    } else {
+        hideTooltip(); hideDeepPanel();
+        canvas.style.cursor = 'grab';
+    }
+}
+
+function onMouseUp() { dragging = false; }
+
+function onWheel(e) {
+    e.preventDefault();
+    const factor = e.deltaY > 0 ? 0.94 : 1.06;
+    const mx = e.clientX, my = e.clientY;
+    const [px, py] = fromScreen(mx, my);  // world point under the cursor
+    targetZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, targetZoom * factor));
+    // Target offset that lands that point back under the cursor once zoom settles.
+    const margin = 60;
+    const scale = Math.min((width - margin * 2) / rangeX, (height - margin * 2) / rangeY);
+    targetOffsetX = mx - width / 2 - (px - (minX + maxX) / 2) * scale * targetZoom;
+    targetOffsetY = my - height / 2 - (py - (minY + maxY) / 2) * scale * targetZoom;
+}
+
+let lastTouchDist = 0;
+function onTouchStart(e) {
+    if (e.touches.length === 1) {
         dragging = true;
-        dragStartX = e.clientX;
-        dragStartY = e.clientY;
+        dragStartX = e.touches[0].clientX;
+        dragStartY = e.touches[0].clientY;
+    } else if (e.touches.length === 2) {
+        lastTouchDist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
     }
-
-    function onMouseMove(e) {
-        if (dragging) {
-            const dx = e.clientX - dragStartX;
-            const dy = e.clientY - dragStartY;
-            // Drag tracks the cursor instantly — otherwise panning feels broken.
-            offsetX += dx;  offsetY += dy;
-            targetOffsetX += dx;  targetOffsetY += dy;
-            dragStartX = e.clientX;
-            dragStartY = e.clientY;
-            hideTooltip();
-            cancelDeepHover();
-            hideDeepPanel();
-            return;
-        }
-        const point = findPointAt(e.clientX, e.clientY);
-        const changed = point !== hoveredPoint;
-        if (changed) {
-            hoveredPoint = point;
-            cancelDeepHover();
-            if (deepHoverPoint && deepHoverPoint !== point) hideDeepPanel();
-            if (point) scheduleDeepHover(point);
-        }
-        if (point) {
-            showTooltip(point, e.clientX, e.clientY);
-            canvas.style.cursor = 'pointer';
-        } else {
-            hideTooltip();
-            hideDeepPanel();
-            canvas.style.cursor = 'grab';
-        }
+    e.preventDefault();
+}
+function onTouchMove(e) {
+    if (e.touches.length === 1 && dragging) {
+        const dx = e.touches[0].clientX - dragStartX, dy = e.touches[0].clientY - dragStartY;
+        offsetX += dx; offsetY += dy;
+        targetOffsetX += dx; targetOffsetY += dy;
+        dragStartX = e.touches[0].clientX;
+        dragStartY = e.touches[0].clientY;
+    } else if (e.touches.length === 2) {
+        const dist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+        if (lastTouchDist > 0) targetZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, targetZoom * dist / lastTouchDist));
+        lastTouchDist = dist;
     }
+    e.preventDefault();
+}
+function onTouchEnd() { dragging = false; lastTouchDist = 0; }
 
-    function onMouseUp() { dragging = false; }
+init();
 
-    function onWheel(e) {
-        e.preventDefault();
-        // Gentler per-tick factor; the smoothing interpolation eases the
-        // change in over several frames so it feels like drifting.
-        const factor = e.deltaY > 0 ? 0.94 : 1.06;
-        const mx = e.clientX, my = e.clientY;
-        const [px, py] = fromScreen(mx, my);  // world coords under cursor
-        targetZoom = Math.max(MIN_ZOOM, Math.min(50, targetZoom * factor));
-        // Set target offset so the cursor's world point lands at (mx, my)
-        // once zoom settles, keeping zoom anchored to the cursor.
-        const margin = 60;
-        const scale = Math.min((width - margin * 2) / rangeX, (height - margin * 2) / rangeY);
-        const cx = width / 2, cy = height / 2;
-        const mxData = (minX + maxX) / 2, myData = (minY + maxY) / 2;
-        targetOffsetX = mx - cx - (px - mxData) * scale * targetZoom;
-        targetOffsetY = my - cy - (py - myData) * scale * targetZoom;
-    }
-
-    let lastTouchDist = 0;
-    function onTouchStart(e) {
-        if (e.touches.length === 1) {
-            dragging = true;
-            dragStartX = e.touches[0].clientX;
-            dragStartY = e.touches[0].clientY;
-        } else if (e.touches.length === 2) {
-            lastTouchDist = Math.hypot(
-                e.touches[0].clientX - e.touches[1].clientX,
-                e.touches[0].clientY - e.touches[1].clientY
-            );
-        }
-        e.preventDefault();
-    }
-    function onTouchMove(e) {
-        if (e.touches.length === 1 && dragging) {
-            const dx = e.touches[0].clientX - dragStartX;
-            const dy = e.touches[0].clientY - dragStartY;
-            offsetX += dx;  offsetY += dy;
-            targetOffsetX += dx;  targetOffsetY += dy;
-            dragStartX = e.touches[0].clientX;
-            dragStartY = e.touches[0].clientY;
-        } else if (e.touches.length === 2) {
-            const dist = Math.hypot(
-                e.touches[0].clientX - e.touches[1].clientX,
-                e.touches[0].clientY - e.touches[1].clientY
-            );
-            if (lastTouchDist > 0) {
-                targetZoom *= dist / lastTouchDist;
-                targetZoom = Math.max(MIN_ZOOM, Math.min(50, targetZoom));
-            }
-            lastTouchDist = dist;
-        }
-        e.preventDefault();
-    }
-    function onTouchEnd() { dragging = false; lastTouchDist = 0; }
-
-    init();
     </script>
 </body>
 </html>
