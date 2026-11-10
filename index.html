@@ -1,4 +1,11 @@
 <!DOCTYPE html>
+<!-- Physical AI map (domains/physical-ai/web/index.html): the standalone
+     project's page (Tron circuit-board backdrop, Baumans type, typewriter deep
+     panel), as published at https://dledge.github.io/physical-ai/ (v1.17),
+     on the platform's placeholders (core/site_render.py). v2.0 (2026-11-07,
+     platform port): the hover panel adds the profile lines (type, scale,
+     geography, partners), company descriptions appear under names at deep
+     zoom, and Esc clears the search. -->
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -9,7 +16,7 @@
     <!-- Open Graph (Facebook, LinkedIn, Slack, iMessage, Discord) -->
     <meta property="og:type" content="website">
     <meta property="og:url" content="https://dledge.github.io/physical-ai/">
-    <meta property="og:title" content="Physical AI — Entity Map">
+    <meta property="og:title" content="Physical AI: Entity Map">
     <meta property="og:description" content="A visual map of companies and organizations shaping the edge and physical AI ecosystem — from inference silicon to deployed robots — clustered by what they actually do.">
     <meta property="og:image" content="https://dledge.github.io/physical-ai/og-image.jpg">
     <meta property="og:image:width" content="1200">
@@ -18,7 +25,7 @@
     <!-- Twitter / X -->
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:url" content="https://dledge.github.io/physical-ai/">
-    <meta name="twitter:title" content="Physical AI — Entity Map">
+    <meta name="twitter:title" content="Physical AI: Entity Map">
     <meta name="twitter:description" content="A visual map of companies and organizations shaping the edge and physical AI ecosystem — from inference silicon to deployed robots — clustered by what they actually do.">
     <meta name="twitter:image" content="https://dledge.github.io/physical-ai/og-image.jpg">
     <script src="https://d3js.org/d3.v7.min.js"></script>
@@ -204,10 +211,7 @@
             pointer-events: none;
         }
     </style>
-    <!-- Cloudflare Web Analytics -->
-    <script defer src='https://static.cloudflareinsights.com/beacon.min.js'
-            data-cf-beacon='{"token": "1b875e43e9c9482680d4cf6a3aecfaf7"}'></script>
-    <!-- End Cloudflare Web Analytics -->
+    <script defer src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "1b875e43e9c9482680d4cf6a3aecfaf7"}'></script>
 </head>
 <body>
     <div id="canvas-container">
@@ -254,27 +258,23 @@
     <div id="last-updated"></div>
 
     <script>
-    // Keys must match config.MACRO_CATEGORIES exactly, plus 'Other'.
+    // Rendered by build_visualization.py from the domain's MACRO_CATEGORIES
+    // (in order) over a fixed palette, plus 'Other'.
     const CATEGORY_COLORS = {
-        'Edge Silicon & Compute':             '#e63946',
-        'Sensors & Components':               '#2a9d8f',
-        'Robot & Vehicle Makers':             '#e9a820',
-        'Developer Tools & Robot Ops':        '#3b82f6',
-        'Autonomy & Intelligence Platforms':  '#a855f7',
-        'Operators & Deployers':              '#f97316',
-        'Investment, Policy & Research':      '#64748b',
-        'Other':                              '#9ca3af',
-    };
-    const CATEGORY_GLOW = {
-        'Edge Silicon & Compute':             'rgba(230, 57, 70, 0.4)',
-        'Sensors & Components':               'rgba(42, 157, 143, 0.4)',
-        'Robot & Vehicle Makers':             'rgba(233, 168, 32, 0.4)',
-        'Developer Tools & Robot Ops':        'rgba(59, 130, 246, 0.4)',
-        'Autonomy & Intelligence Platforms':  'rgba(168, 85, 247, 0.4)',
-        'Operators & Deployers':              'rgba(249, 115, 22, 0.4)',
-        'Investment, Policy & Research':      'rgba(100, 116, 139, 0.3)',
-        'Other':                              'rgba(156, 163, 175, 0.3)',
-    };
+        "Edge Silicon & Compute": "#e63946",
+        "Sensors & Components": "#2a9d8f",
+        "Robot & Vehicle Makers": "#e9a820",
+        "Developer Tools & Robot Ops": "#3b82f6",
+        "Autonomy & Intelligence Platforms": "#a855f7",
+        "Operators & Deployers": "#f97316",
+        "Investment, Policy & Research": "#64748b",
+        "Other": "#9ca3af"
+};
+    const CATEGORY_GLOW = Object.fromEntries(Object.entries(CATEGORY_COLORS).map(([k, hex]) => {
+        const n = parseInt(hex.slice(1), 16);
+        const a = (k === 'Other' || hex === '#64748b') ? 0.3 : 0.4;
+        return [k, `rgba(${n >> 16}, ${(n >> 8) & 255}, ${n & 255}, ${a})`];
+    }));
 
     function getRadius(point, zoom) {
         // Wider range than the old star look so mention count reads directly
@@ -289,6 +289,33 @@
     let offsetX = 0, offsetY = 0;
     let targetOffsetX = 0, targetOffsetY = 0;
     const MIN_ZOOM = 1.2;  // also the initial / reset zoom
+    const DESC_START = 16; // zoom where descriptions appear under company names
+
+    // A company's description wrapped to a narrow column (max 3 lines), cached
+    // per font size. ctx.font must already be set to the description font.
+    function descLines(point, size) {
+        const key = Math.round(size * 2);
+        if (point._descKey === key) return point._desc;
+        const maxW = size * 19;
+        const words = String(point.description).split(/\s+/);
+        const lines = [];
+        let cur = '';
+        for (const w of words) {
+            const next = cur ? cur + ' ' + w : w;
+            if (ctx.measureText(next).width > maxW && cur) {
+                lines.push(cur);
+                cur = w;
+                if (lines.length === 3) break;
+            } else {
+                cur = next;
+            }
+        }
+        if (lines.length < 3 && cur) lines.push(cur);
+        else if (lines.length === 3 && cur) lines[2] = lines[2].replace(/[,.;:]?$/, '…');
+        point._descKey = key;
+        point._desc = lines;
+        return lines;
+    }
     let zoom = MIN_ZOOM;
     let targetZoom = MIN_ZOOM;
     // Camera-smoothing rate (per second). Frame-rate independent: the actual
@@ -605,6 +632,14 @@
         document.getElementById('zoom-out').addEventListener('click', () => { targetZoom = Math.max(MIN_ZOOM, targetZoom / 1.3); });
         document.getElementById('zoom-reset').addEventListener('click', () => { targetZoom = MIN_ZOOM; targetOffsetX = 0; targetOffsetY = 0; });
         document.getElementById('search').addEventListener('input', (e) => { searchTerm = e.target.value.toLowerCase(); });
+        // Esc clears the search, wherever the focus is.
+        document.addEventListener('keydown', (e) => {
+            if (e.key !== 'Escape') return;
+            const box = document.getElementById('search');
+            if (!box.value && !searchTerm) return;
+            box.value = ''; searchTerm = '';
+            box.blur();
+        });
         document.getElementById('mention-slider').addEventListener('input', (e) => {
             mentionThreshold = +e.target.value;
             document.getElementById('mention-val').textContent = e.target.value;
@@ -625,7 +660,7 @@
         data = await resp.json();
 
         // Version + last-updated note — bump APP_VERSION on notable UX/pipeline changes.
-        const APP_VERSION = 'v1.17';
+        const APP_VERSION = 'v2.0';
         if (data.generated_at) {
             const d = new Date(data.generated_at);
             const mm = String(d.getMonth() + 1).padStart(2, '0');
@@ -880,6 +915,7 @@
         }
 
         // --- Entity nodes ---
+        const nameRects = [], descQueue = [];
         for (const point of data.points) {
             if (!isPointVisible(point)) continue;
 
@@ -951,6 +987,46 @@
                 ctx.fillStyle = '#eef5fc';
                 ctx.fillText(point.name, sx + radius + 4, sy);
                 ctx.globalAlpha = 1;
+
+                // Deepest zoom: queue the description; it is drawn after every
+                // name is placed, only where it collides with nothing.
+                const lx = sx + radius + 4;
+                nameRects.push([lx - 2, sy - fs * 0.6, lx + ctx.measureText(point.name).width + 2, sy + fs * 0.6, point]);
+                const da = zoom > DESC_START ? Math.min(1, (zoom - DESC_START) / 4) * la : 0;
+                if (da > 0.05 && point.description && sx > -300 && sx < width && sy > -60 && sy < height + 20) {
+                    descQueue.push({ point, lx, sy, fs, da, first: isHovered || isSearchMatch });
+                }
+            }
+        }
+
+        // Descriptions under names (deepest zoom): hovered/searched first, then
+        // the most-covered companies; any that would overlap a name or an
+        // already drawn description is left out (hover still shows it).
+        if (descQueue.length) {
+            descQueue.sort((a, b) => (b.first - a.first) || (b.point.mention_count - a.point.mention_count));
+            const placed = [];
+            const hits = (r, list, self) => list.some(o => o[4] !== self && r[0] < o[2] && r[2] > o[0] && r[1] < o[3] && r[3] > o[1]);
+            for (const q of descQueue) {
+                const dfs = Math.max(10, q.fs * 0.8);
+                ctx.font = `400 ${dfs}px system-ui, -apple-system, "Segoe UI", sans-serif`;
+                const lines = descLines(q.point, dfs);
+                const top = q.sy + q.fs * 0.62;
+                const w = Math.max(...lines.map(l => ctx.measureText(l).width));
+                const r = [q.lx - 2, top, q.lx + w + 2, top + lines.length * dfs * 1.22 + 2, q.point];
+                if (!q.first && (hits(r, nameRects, q.point) || hits(r, placed, null))) continue;
+                placed.push(r);
+                ctx.textAlign = 'left';
+                ctx.textBaseline = 'middle';
+                ctx.lineJoin = 'round';
+                ctx.lineWidth = Math.max(2.2, dfs * 0.22);
+                ctx.strokeStyle = `rgba(6, 7, 10, ${q.da * 0.75})`;
+                ctx.fillStyle = `rgba(160, 200, 232, ${q.da})`;
+                let ly = top + dfs * 0.75;
+                for (const line of lines) {
+                    ctx.strokeText(line, q.lx, ly);
+                    ctx.fillText(line, q.lx, ly);
+                    ly += dfs * 1.22;
+                }
             }
         }
 
@@ -1083,6 +1159,8 @@
         const raw = (point.bullets || '').split('\n').filter(Boolean);
         const bullets = raw.map(line => line.replace(/^\s*\d+\.\s*/, '').trim()).filter(Boolean);
         if (!bullets.length) return null;
+        // Hover-panel attributes (type, scale, geography, partners...): shown, never embedded.
+        (point.profile || '').split('\n').map(s => s.trim()).filter(Boolean).forEach(s => bullets.push(s));
         const entry = { title: point.name, bullets };
         bulletsCache.set(point.name, entry);
         return entry;
